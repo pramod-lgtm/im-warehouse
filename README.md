@@ -35,3 +35,6 @@ Billing > "Download template" gives `Billing_Import_Template.xlsx`; its headers 
 
 ## Manual orders (phone / WhatsApp / walk-in / email / salesman)
 "+ New order" (admin, manager, dispatch): pick a dealer or add a new one, source, taken by, salesman, brand lines (brand, item, qty, value), remarks, expected dispatch date, priority. Manual orders are numbered W-1, W-2... (Sales Tracker orders show as ST-<id>), follow the same stages, hold and bill matching, and can be edited or cancelled (with reason) until billed. Source shows as a badge, a filter in All orders, on the dashboard and in the CSV.
+
+## Order SLA
+Every order must be billed within `sla_hours` of being received (Sales Tracker visit time, or create time for in-app orders). After `cutoff_time`, before `open_time`, and on holidays / weekly off the deadline moves as per the Settings tab. Managers can mark "Waiting for purchase - <brand>" on an order, and record "Purchase aaya" (Dashboard > 📦) to give pending orders of that brand a new deadline. Dashboard shows On time / Due soon / Delayed / Waiting for stock, delayed report and on-time % by day.

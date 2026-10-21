@@ -35,6 +35,30 @@ function srcOf(o) { return o.source || 'Sales Tracker'; }
 function canNew() { return ['admin', 'warehouse_manager', 'dispatch'].indexOf(role()) >= 0; }
 function badges(o) { return ' <span class="pill src">' + h(srcOf(o)) + '</span>' + (o.priority === 'Urgent' ? ' <span class="pill st-hold">URGENT</span>' : ''); }
 function pill(o) { return '<span class="pill st-' + h(o.stage) + '">' + h(stageLbl(o.stage)) + '</span>' + (Number(o.hold) ? ' <span class="pill st-hold">HOLD</span>' : ''); }
+// ---------------- SLA (bill within deadline)
+var SLA_CLS = { 'On time': 'sla-ok', 'Due soon': 'sla-soon', 'Delayed': 'sla-late', 'Waiting for stock': 'sla-wait' };
+var SLA_LBL = { 'On time': 'On time', 'Due soon': 'Due soon', 'Delayed': 'Delayed', 'Waiting for stock': 'Waiting for stock' };
+function left(dlIso) { var m = Math.round((Date.parse(dlIso) - Date.now()) / 60000); return m >= 0 ? mins(m) + ' baaki' : mins(-m) + ' late'; }
+/** live status from deadline (server status is the base; Waiting/Delayed stay as they are). */
+function slaNow(s) { if (!s || s.billed || s.status === 'Waiting for stock' || s.status === 'Delayed') return s && s.status; var m = (Date.parse(s.deadline) - Date.now()) / 60000; return m < 0 ? 'Delayed' : m <= 30 ? 'Due soon' : 'On time'; }
+function slaBadge(o, long) {
+  var s = o.sla; if (!s) return ''; var st = slaNow(s);
+  var t = s.billed ? (st === 'Delayed' ? 'Delayed processing (' + mins(s.delay_min) + ')' : 'Bill on time')
+    : st === 'Waiting for stock' ? 'Waiting for stock: ' + s.waiting.join(', ') : SLA_LBL[st] + ' • <span data-dl="' + h(s.deadline) + '">' + left(s.deadline) + '</span>';
+  return ' <span class="pill ' + SLA_CLS[st] + '">' + t + '</span>' + (long ? '<div class="small muted">Order aaya ' + tm(s.received_at) + ' • Bill deadline <b>' + tm(s.deadline) + '</b>' + (s.purchase ? ' (purchase ke baad)' : '') + '</div>' : '');
+}
+setInterval(function () { Array.prototype.forEach.call(document.querySelectorAll('[data-dl]'), function (e) { e.textContent = left(e.dataset.dl); }); }, 30000);
+function slaHelp() {
+  var c = (S.m && S.m.sla) || {};
+  return '<details class="small help"><summary>ⓘ Rules kaise kaam karte hain</summary><ul>' +
+    '<li>Har order ko aane ke <b>' + h(c.sla_hours || 2) + ' ghante</b> ke andar <b>bill</b> hona chahiye. Nahi hua to <b class="short">Delayed</b> (baad mein bill ho jaye tab bhi Delayed hi rahega, kitni der hui woh bhi dikhega).</li>' +
+    '<li><b>' + h(c.cutoff_time || '17:00') + '</b> ke baad aaya order: deadline agle din <b>' + h(c.next_day_deadline || '11:00') + '</b>.</li>' +
+    '<li>Warehouse khulne (<b>' + h(c.open_time || '10:00') + '</b>) se pehle aaya order: deadline = open time + ' + h(c.sla_hours || 2) + ' ghante.</li>' +
+    '<li>Chhutti (' + h(c.weekly_off || 'weekly off nahi') + (c.holidays ? '; ' + h(c.holidays) : '') + ') wale din aaya order: agle working din ' + h(c.next_day_deadline || '11:00') + '.</li>' +
+    '<li>Kisi brand ka stock nahi hai to manager order par <b>Waiting for purchase</b> lagaye. Tab tak order Delayed nahi ginta, alag "Waiting for stock" mein dikhta hai.</li>' +
+    '<li>Purchase aane par <b>Purchase aaya</b> mein brand + time daalein. Us brand ke sab pending orders ki nayi deadline = aane ka time + ' + h(c.purchase_grace_hours || 24) + ' ghante.</li>' +
+    '<li>Due soon = deadline mein 30 min se kam bacha. Settings Google Sheet ke Settings tab mein badlein.</li></ul></details>';
+}
 function csv(rows, name) {
   if (!rows.length) return toast('Kuch data nahi', 'err'); var keys = Object.keys(rows[0]);
   var s = [keys.join(',')].concat(rows.map(function (r) { return keys.map(function (k) { var v = r[k] == null ? '' : typeof r[k] === 'object' ? JSON.stringify(r[k]) : String(r[k]); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(','); })).join('\n');
@@ -60,7 +84,7 @@ function route() {
     if (p.indexOf('/o/') === 0) return vOrder(v, Number(p.slice(3)));
     if (p === '/new') return vNew(v, null);
     if (p.indexOf('/edit/') === 0) return call('order', { id: Number(p.slice(6)) }).then(function (r) { vNew(v, r.order); }).catch(fail);
-    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/dash': vDash, '/dl': vDealers, '/admin': vAdmin }[p] || vQueue; f(v);
+    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/dash': vDash, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase }[p] || vQueue; f(v);
   }).catch(fail);
 }
 window.addEventListener('hashchange', route);
@@ -80,7 +104,7 @@ function vSetup(v) {
 // ---------------- lists
 function card(o) {
   return '<a class="card" style="display:block;text-decoration:none;color:inherit" href="#/o/' + o.id + '"><div class="row"><b>' + h(ono(o)) + ' ' + h(o.dealer_name) + '</b><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div>' +
-    '<div class="small muted">' + h(dmy(o.order_date)) + ' • ' + (o.zone ? '<b>' + h(o.zone) + '</b> / ' : '') + h(o.area || 'area ?') + (o.route ? ' • ' + h(o.route) : '') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.salesman ? ' • ' + h(o.salesman) : '') + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.expected_date ? ' • exp ' + h(dmy(o.expected_date)) : '') + '</div>' +
+    '<div class="small">' + slaBadge(o) + '</div><div class="small muted">' + h(dmy(o.order_date)) + ' • ' + (o.zone ? '<b>' + h(o.zone) + '</b> / ' : '') + h(o.area || 'area ?') + (o.route ? ' • ' + h(o.route) : '') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.salesman ? ' • ' + h(o.salesman) : '') + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.expected_date ? ' • exp ' + h(dmy(o.expected_date)) : '') + '</div>' +
     '<div class="small">' + (o.lines || []).map(function (l) { return h(l.brand) + ' ' + inr(l.ordered_value) + (l.ordered_qty !== '' ? ' (' + l.ordered_qty + ' pcs)' : ''); }).join(' + ') +
     [['P', o.picker_name], ['C', o.checker_name], ['B', o.biller_name], ['Pk', o.packer_name]].filter(function (x) { return x[1]; }).map(function (x) { return ' • ' + x[0] + ': ' + h(x[1]); }).join('') + (o.invoice_no ? ' • Inv ' + h(o.invoice_no) : '') + (o.vehicle || o.delivery_mode ? ' • ' + h(o.vehicle || o.delivery_mode) : '') + '</div>' +
     (Number(o.hold) ? '<div class="small short">Hold: ' + h(o.hold_reason) + ' ' + h(o.hold_note) + '</div>' : '') + (o.stage === 'cancelled' ? '<div class="small short">Cancel: ' + h(o.cancel_reason) + '</div>' : '') + '</a>';
@@ -144,11 +168,11 @@ function vOrder(v, id) {
     var del = '';
     if (can('delivery') && si >= S.m.stages.indexOf('billed') && o.stage !== 'dispatched') del = '<div class="card"><h3>Delivery allocation</h3>' + delForm(o) + '<button class="primary big" id="delb" style="margin-top:10px">Save delivery</button></div>';
     var nb = r.nearby.length ? '<div class="card"><h3>Paas ke pending orders (' + r.nearby.length + ')</h3><p class="small muted">Inhe saath mein bill / dispatch karein.</p>' + r.nearby.map(function (x) { return '<div class="chk"><a href="#/o/' + x.id + '">#' + x.id + ' ' + h(x.dealer_name) + '</a><span class="small muted">' + h(x.why) + (x.km !== '' ? ' • ' + x.km + ' km' : '') + ' • ' + h(stageLbl(x.stage)) + (Number(x.hold) ? ' • HOLD' : '') + ' • ' + inr(x.ordered_value) + (x.zone ? ' • ' + h(x.zone) : '') + '</span></div>'; }).join('') + '</div>' : '';
-    v.innerHTML = '<div class="card"><div class="row"><h2>' + h(ono(o)) + ' ' + h(o.dealer_name) + '</h2><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div><div class="small muted">Zone ' + h(o.zone || '-') + ' • ' + h(o.area || 'area ?') + ' • ' + h(o.route || '-') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.lat !== '' ? ' • <a target="_blank" href="https://www.google.com/maps?q=' + o.lat + ',' + o.lng + '">map</a>' : '') + '</div>' + (o.remarks ? '<div class="small">Remark: ' + h(o.remarks) + '</div>' : '') +
+    v.innerHTML = '<div class="card"><div class="row"><h2>' + h(ono(o)) + ' ' + h(o.dealer_name) + '</h2><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div><div class="small muted">Zone ' + h(o.zone || '-') + ' • ' + h(o.area || 'area ?') + ' • ' + h(o.route || '-') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.lat !== '' ? ' • <a target="_blank" href="https://www.google.com/maps?q=' + o.lat + ',' + o.lng + '">map</a>' : '') + '</div>' + '<div class="small" style="margin-top:4px">' + slaBadge(o, true) + '</div>' + (o.remarks ? '<div class="small">Remark: ' + h(o.remarks) + '</div>' : '') +
       '<div class="small muted">Source: ' + h(srcOf(o)) + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.salesman ? ' • salesman: ' + h(o.salesman) : '') + (o.expected_date ? ' • expected dispatch ' + h(dmy(o.expected_date)) : '') + (o.edited_at ? ' • edited ' + tm(o.edited_at) + ' ' + h(o.edited_by) : '') + '</div>' +
       (o.stage === 'cancelled' ? '<div class="short">Cancel: ' + h(o.cancel_reason) + ' (' + tm(o.cancelled_at) + ', ' + h(o.cancelled_by) + ')</div>' : '') +
       (manEdit ? '<div class="row" style="margin-top:8px"><a class="btn sm" href="#/edit/' + o.id + '">✏️ Edit</a><button class="sm danger" id="cnl">Cancel order</button></div>' : '') + '</div>' +
-      (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + tl + act + '</div>' + hold + del + nb;
+      (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + tl + act + '</div>' + waitCard(o) + hold + del + nb;
     var b = $('stepb'); if (b) b.onclick = function () {
       var d = { id: o.id, action: nx };
       if (nx === 'allocate') {
@@ -165,9 +189,18 @@ function vOrder(v, id) {
     if (isMgr() && !S.dl) loadDealers().then(function () { var e = $('dlbox'); if (e) e.outerHTML = dlists(); }).catch(function () {});
     if ($('saveq')) $('saveq').onclick = function () { var ls = []; Array.prototype.forEach.call(document.querySelectorAll('.oq'), function (i) { ls.push({ id: i.dataset.id, ordered_qty: i.value }); }); call('setLines', { id: o.id, lines: ls }).then(function () { toast('Saved'); vOrder(v, id); }).catch(fail); };
     if ($('hb')) $('hb').onclick = function () { call('hold', { id: o.id, reason: val('hr'), note: val('hn') }).then(function () { toast('Hold kiya'); vOrder(v, id); }).catch(fail); };
+    if ($('wsv')) $('wsv').onclick = function () { var b = Array.prototype.filter.call(document.querySelectorAll('.wb'), function (i) { return i.checked; }).map(function (i) { return i.value; }); call('waitPurchase', { id: o.id, brands: b }).then(function () { toast(b.length ? 'Waiting for purchase - ' + b.join(', ') : 'Stock wait hata diya'); vOrder(v, id); }).catch(fail); };
     if ($('unh')) $('unh').onclick = function () { call('unhold', { id: o.id }).then(function () { toast('Unhold'); vOrder(v, id); }).catch(fail); };
     if ($('delb')) $('delb').onclick = function () { call('delivery', delData([o.id])).then(function () { toast('Delivery saved'); vOrder(v, id); }).catch(fail); };
   }).catch(fail);
+}
+function waitCard(o) {
+  if (!isMgr() || o.stage === 'cancelled' || o.billed_at || S.m.stages.indexOf(o.stage) >= S.m.stages.indexOf('billed')) return '';
+  var cur = String(o.wait_brands || '').split(',').filter(String), br = [];
+  o.lines.forEach(function (l) { var b = String(l.brand).toUpperCase(); if (b && br.indexOf(b) < 0) br.push(b); });
+  return '<div class="card"><h3>Stock wait (purchase)</h3><p class="small muted">Jis brand ka stock nahi hai use tick karein. Tick rahne tak order Delayed nahi ginta.</p>' +
+    br.map(function (b) { return '<label class="chk"><input type="checkbox" class="wb" value="' + h(b) + '"' + (cur.indexOf(b) >= 0 ? ' checked' : '') + '> Waiting for purchase - ' + h(b) + '</label>'; }).join('') +
+    (cur.length ? '<div class="small muted">Lagaya: ' + tm(o.wait_at) + ' • ' + h(o.wait_by) + '</div>' : '') + '<button class="warn" id="wsv" style="margin-top:8px">Save</button> <a class="btn sm" href="#/pr">📦 Purchase aaya</a></div>';
 }
 // "Done by": users of that role + staff names of that role + Other (free text)
 function peopleFor(r) {
@@ -357,7 +390,13 @@ function table(rows, cols) { return '<div class="tw"><table><tr>' + cols.map(fun
 function vDash(v) {
   var day = LS.getItem('imw_day') || today();
   call('dashboard', { date: day }).then(function (d) {
+    var sl = d.sla || { counts: {}, open: [], delayed: [], kpi: [] }, sc = sl.counts;
     v.innerHTML = '<div class="row"><h2>Dashboard</h2><input type="date" id="day" value="' + day + '" style="flex:0 1 170px"></div>' +
+      '<div class="card"><div class="row"><h3>Bill deadline (SLA)</h3><a class="btn sm" href="#/pr" style="flex:0">📦 Purchase aaya</a></div>' + slaHelp() +
+      '<div class="grid4" style="margin-top:8px"><div class="kpi"><b style="color:var(--good)">' + (sc['On time'] || 0) + '</b><span>On time</span></div><div class="kpi"><b style="color:var(--mid)">' + (sc['Due soon'] || 0) + '</b><span>Due soon (&lt;30 min)</span></div><div class="kpi"><b class="short">' + (sc['Delayed'] || 0) + '</b><span>Delayed</span></div><div class="kpi"><b style="color:#5b2a7a">' + (sc['Waiting for stock'] || 0) + '</b><span>Waiting for stock</span></div></div>' +
+      '<h3 style="margin-top:12px">Pending orders: deadline</h3>' + (sl.open.length ? table(sl.open.slice(0, 100), [['id', '#', function (x, r) { return '<a href="#/o/' + x + '">' + h(r.order_no || x) + '</a>'; }], ['dealer_name', 'Dealer'], ['status', 'Status', function (x, r) { return slaBadge({ sla: { status: x, deadline: r.deadline, waiting: r.waiting ? r.waiting.split(', ') : [], delay_min: r.delay_min } }); }], ['deadline', 'Deadline', tm], ['received_at', 'Order aaya', tm]]) : '<p class="muted small">Koi pending order nahi.</p>') +
+      '<div class="row" style="margin-top:12px"><h3>Delayed orders (' + sl.delayed.length + ')</h3><button class="sm" id="e4" style="flex:0">CSV</button></div>' + (sl.delayed.length ? table(sl.delayed, [['id', '#', function (x, r) { return '<a href="#/o/' + x + '">' + h(r.order_no || x) + '</a>'; }], ['dealer_name', 'Dealer'], ['received_at', 'Order aaya', tm], ['deadline', 'Deadline', tm], ['billed_at', 'Bill', function (x) { return x ? tm(x) : '<span class="short">abhi pending</span>'; }], ['delay_min', 'Kitna late', function (x) { return '<span class="pill sla-late">' + mins(x) + '</span>'; }]]) : '<p class="muted small">Koi delayed order nahi 👍</p>') +
+      '<h3 style="margin-top:12px">On-time % (din wise, order aane ka din)</h3>' + table(sl.kpi, [['day', 'Din', dmy], ['orders', 'Orders'], ['on_time', 'On time bill'], ['delayed', 'Delayed'], ['pending', 'Abhi pending'], ['pct', 'On-time %', function (x) { return x === '' ? '-' : '<b style="color:' + (x >= 90 ? 'var(--good)' : x >= 70 ? 'var(--mid)' : 'var(--low)') + '">' + x + '%</b>'; }]]) + '</div>' +
       
       '<div class="grid4">' + S.m.stages.map(function (s) { return '<div class="kpi"><b>' + (d.counts[s] || 0) + '</b><span>' + h(stageLbl(s)) + '</span></div>'; }).join('') + '<div class="kpi"><b class="short">' + d.counts.hold + '</b><span>HOLD</span></div><div class="kpi"><b>' + d.unmatched + '</b><span>Unmatched bills</span></div></div>' +
       '<div class="card" style="margin-top:12px"><h3>Source wise (last 30 din)</h3><div class="grid4">' + Object.keys(d.sources || {}).map(function (k) { return '<div class="kpi"><b>' + d.sources[k] + '</b><span>' + h(k) + '</span></div>'; }).join('') + '</div></div>' +
@@ -366,6 +405,30 @@ function vDash(v) {
       '<div class="card"><div class="row"><h3>Efficiency (last 30 din, avg time per step)</h3><button class="sm" id="e3">CSV</button></div>' + table(d.efficiency, [['step', 'Step'], ['person', 'Kisne'], ['orders', 'Orders'], ['avg_min', 'Avg', mins], ['max_min', 'Max', mins]]) + '</div>';
     $('day').onchange = function () { LS.setItem('imw_day', this.value); vDash(v); };
     $('e1').onclick = function () { csv(d.pending, 'pending-to-bill'); }; $('e2').onclick = function () { csv(d.dispatch.map(function (r) { return Object.assign({}, r, { dealers: r.dealers.join(' | ') }); }), 'dispatch-' + day); }; $('e3').onclick = function () { csv(d.efficiency, 'efficiency'); };
+    $('e4').onclick = function () { csv(sl.delayed.map(function (r) { return { order: r.order_no || r.id, dealer: r.dealer_name, source: r.source, received: tm(r.received_at), deadline: tm(r.deadline), billed: r.billed_at ? tm(r.billed_at) : 'pending', delay_min: r.delay_min }; }), 'delayed-orders'); };
+  }).catch(fail);
+}
+
+// ---------------- purchase received (stock aaya)
+function istNowLocal() { return new Date(Date.now() + 330 * 60000).toISOString().slice(0, 16); }
+function vPurchase(v) {
+  if (!isMgr()) return go('/q');
+  Promise.all([call('purchaseList'), call('orders', { all: 1 })]).then(function (r) {
+    var waiting = r[1].filter(function (o) { return o.wait_brands && !o.billed_at && o.stage !== 'cancelled'; }), wb = {};
+    waiting.forEach(function (o) { o.wait_brands.split(',').forEach(function (b) { wb[b] = (wb[b] || 0) + 1; }); });
+    var brands = BRANDS.slice(); Object.keys(wb).forEach(function (b) { if (brands.indexOf(b) < 0) brands.push(b); });
+    v.innerHTML = '<h2>📦 Purchase aaya (stock received)</h2><div class="card">' + slaHelp() +
+      '<p class="small">Waiting for stock: ' + (Object.keys(wb).length ? Object.keys(wb).map(function (b) { return '<b>' + h(b) + '</b> ' + wb[b] + ' order'; }).join(' • ') : 'koi nahi') + '</p>' +
+      '<datalist id="dl_brand">' + brands.map(function (b) { return '<option value="' + h(b) + '">'; }).join('') + '</datalist>' +
+      '<div class="grid2"><div><label>Brand</label><input id="pb" list="dl_brand" value="' + h(Object.keys(wb)[0] || '') + '"></div><div><label>Kab aaya (date-time)</label><input id="pt" type="datetime-local" value="' + istNowLocal() + '"></div>' +
+      '<div><label>Kisne receive kiya</label><input id="pw" value="' + h(S.user.name) + '"></div><div><label>Note (optional)</label><input id="pn" placeholder="Bill no / supplier"></div></div>' +
+      '<button class="primary big" id="ps" style="margin-top:10px">Save: purchase aaya</button><p class="small muted">Us brand ke sab pending (bill se pehle) orders ki nayi deadline = yeh time + ' + h((S.m.sla || {}).purchase_grace_hours || 24) + ' ghante.</p></div>' +
+      '<div class="card"><h3>Pichli entries</h3>' + (r[0].length ? table(r[0], [['brand', 'Brand'], ['received_at', 'Aaya', tm], ['by_name', 'Kisne'], ['note', 'Note'], ['orders_updated', 'Orders']]) : '<p class="muted small">Abhi koi entry nahi.</p>') + '</div>';
+    $('ps').onclick = function () {
+      var b = val('pb').toUpperCase(), t = val('pt'); if (!b) return toast('Brand likhein', 'err'); if (!t) return toast('Date-time daalein', 'err');
+      if (!confirm(b + ' ka purchase ' + t.replace('T', ' ') + ' par aaya? Iske pending orders ki deadline badlegi.')) return;
+      call('purchaseReceived', { brand: b, received_at: t, by: val('pw'), note: val('pn') }).then(function (x) { toast(x.orders_updated + ' orders ki nayi deadline: ' + tm(x.deadline)); vPurchase(v); }).catch(fail);
+    };
   }).catch(fail);
 }
 
