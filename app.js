@@ -311,7 +311,8 @@ function mapBillRows(rows, map) {
 function loadUm() {
   Promise.all([call('unmatchedBills'), call('orders', { all: 1 })]).then(function (r) {
     var um = r[0], open = r[1].filter(function (o) { return !o.invoice_no && o.stage !== 'dispatched'; });
-    $('um').innerHTML = um.length ? um.map(function (b) {
+    var host = $('um'); if (!host) return; // user left Billing before this slow load finished
+    host.innerHTML = um.length ? um.map(function (b) {
       return '<div class="card"><b>' + h(b.invoice_no) + '</b> • ' + h(dmy(b.bill_date)) + ' • ' + h(b.dealer) + ' • qty ' + h(b.qty) + ' • ' + inr(b.value) + '<div class="row" style="margin-top:6px"><select class="lk" data-id="' + b.id + '"><option value="">Order chunein</option>' + open.map(function (o) { return '<option value="' + o.id + '">' + h(o.track_no || '#' + o.id) + ' ' + h(o.dealer_name) + ' (' + h(dmy(o.order_date)) + ')</option>'; }).join('') + '</select><button class="sm primary" data-link="' + b.id + '">Link</button><button class="sm" data-ign="' + b.id + '">Ignore</button></div></div>';
     }).join('') : '<p class="muted">Sab bills match ho gaye.</p>';
     Array.prototype.forEach.call(document.querySelectorAll('[data-link]'), function (bt) { bt.onclick = function () { var s = document.querySelector('.lk[data-id="' + bt.dataset.link + '"]'); if (!s.value) return toast('Order chunein', 'err'); call('linkBill', { bill_id: Number(bt.dataset.link), order_id: Number(s.value) }).then(function () { toast('Linked'); loadUm(); }).catch(fail); }; });
