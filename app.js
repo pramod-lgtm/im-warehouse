@@ -28,7 +28,7 @@ function signOut(local) { if (!local) call('logout', {}, true).catch(function ()
 function masters(force) { if (S.m && !force) return Promise.resolve(S.m); return call('masters').then(function (m) { S.m = m; return m; }); }
 function role() { return S.user && S.user.role; }
 function isMgr() { return role() === 'admin' || role() === 'warehouse_manager'; }
-function can(p) { var P = { view: ['admin', 'warehouse_manager'], bills: ['admin', 'warehouse_manager', 'biller'], hold: ['admin', 'warehouse_manager', 'biller'], delivery: ['admin', 'warehouse_manager', 'dispatch'], sync: ['admin', 'warehouse_manager', 'biller'], manage: ['admin'], recvtime: ['admin', 'warehouse_manager'] }; return (P[p] || []).indexOf(role()) >= 0; }
+function can(p) { var P = { view: ['admin', 'warehouse_manager'], bills: ['admin', 'warehouse_manager', 'biller'], hold: ['admin', 'warehouse_manager', 'biller', 'coordinator'], holdmgr: ['admin', 'warehouse_manager', 'coordinator'], delivery: ['admin', 'warehouse_manager', 'dispatch'], sync: ['admin', 'warehouse_manager', 'biller'], manage: ['admin'], recvtime: ['admin', 'warehouse_manager'] }; return (P[p] || []).indexOf(role()) >= 0; }
 function stageLbl(s) { return (S.m && S.m.stage_label[s]) || s; }
 function ono(o) { return o.order_no || (/^W-/.test(o.src_id) ? o.src_id : '#' + o.id); }
 function trk(o) { return o.track_no ? '<span class="trk">' + h(o.track_no) + '</span> ' : ''; }
@@ -69,7 +69,7 @@ function sheet(html) { var d = document.createElement('div'); d.className = 'she
 
 // ---------------- router
 function go(p) { if (location.hash !== '#' + p) location.hash = '#' + p; else route(); }
-var NAV = [['/q', '📋', 'Meri queue', null], ['/all', '🏬', 'Sab orders', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/dash', '📊', 'Dashboard', 'view'], ['/admin', '⚙️', 'Admin', 'manage']];
+var NAV = [['/q', '📋', 'Meri queue', null], ['/all', '🏬', 'Sab orders', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/dash', '📊', 'Dashboard', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
 function nav(cur) {
   var n = $('nav'); if (!S.user) { n.classList.add('hidden'); return; }
   n.innerHTML = NAV.filter(function (x) { return !x[3] || can(x[3]); }).map(function (x) { return '<a href="#' + x[0] + '" class="' + (cur.indexOf(x[0]) === 0 ? 'on' : '') + '"><i>' + x[1] + '</i>' + x[2] + '</a>'; }).join('');
@@ -85,10 +85,50 @@ function route() {
     if (p.indexOf('/o/') === 0) return vOrder(v, Number(p.slice(3)));
     if (p === '/new') return vNew(v, null);
     if (p.indexOf('/edit/') === 0) return call('order', { id: Number(p.slice(6)) }).then(function (r) { vNew(v, r.order); }).catch(fail);
-    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/dash': vDash, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase }[p] || vQueue; f(v);
+    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/dash': vDash, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList }[p] || vQueue; f(v);
   }).catch(fail);
 }
 window.addEventListener('hashchange', route);
+
+// ---------------- hold list (office coordinator)
+function parseHoldPaste(t) {
+  return String(t || '').split(/\r?\n/).map(function (l) { return l.split(/\t|,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(function (x) { return x.replace(/^"|"$/g, '').trim(); }); })
+    .filter(function (c) { return c[0] && !/^dealer$/i.test(c[0]); }).map(function (c) { return { dealer: c[0], why: c[1] || '', brand: c[2] || '', os: (c[3] || '').replace(/[,₹\s]/g, '') }; });
+}
+function vHoldList(v) {
+  Promise.all([call('holdList'), call('orders', { all: 1 })]).then(function (rs) {
+    var hl = rs[0], open = rs[1].filter(function (o) { return o.stage !== 'cancelled' && o.stage !== 'dispatched' && !o.invoice_no && S.m.stages.indexOf(o.stage) < S.m.stages.indexOf('billed'); }), match = [];
+    v.innerHTML = '<h2>Hold dealers list</h2><p class="small muted">Is list ke dealers ke naye orders apne aap HOLD ho jaate hain, jab tak agli list import na ho. List date: <b>' + h(hl.list_date || '-') + '</b> • ' + hl.entries.length + ' dealers</p>' +
+      '<div class="card">' + (hl.entries.length ? table(hl.entries, [['dealer_name', 'Dealer'], ['why', 'Reason'], ['brand', 'Brand'], ['os', 'OS', inr], ['created_by', 'Kisne'], ['id', '', function (x) { return '<button class="sm warn" data-rm="' + x + '">Hatao</button>'; }]]) : '<span class="muted">List khali hai.</span>') + '</div>' +
+      '<details class="card"><summary><b>+ Ek dealer jodein</b></summary><datalist id="dl_hd">' + hl.dealers.map(function (d) { return '<option value="' + h(d.name) + '">'; }).join('') + '</datalist><label>Dealer</label><input id="ad" list="dl_hd" placeholder="Naam search karein"><div class="grid2"><div><label>Reason</label><input id="aw" placeholder="CHEQUE BOUNCE / >100d"></div><div><label>Brand</label><input id="ab" placeholder="TRYLO / C9 / BOTH"></div></div><label>OS (Rs)</label><input id="ao" inputmode="numeric"><button class="primary" id="aa" style="margin-top:8px">Jodein + open orders hold karein</button></details>' +
+      '<details class="card"><summary><b>Nayi list import (purani list replace hogi)</b></summary><p class="small muted">Excel se paste karein: Dealer | Reason | Brand | OS (har line ek dealer).</p><label>List date</label><input id="ld" placeholder="24-Oct" value="' + h(hl.list_date) + '"><textarea id="lp" rows="6" style="width:100%"></textarea><button id="lm" style="margin-top:6px">Match karein</button><div id="lr"></div></details>' +
+      '<div class="card"><h3>Open orders – select karke hold / unhold</h3><input id="oq" placeholder="Dealer / tracking no"><div class="row" style="margin-top:6px"><select id="br">' + S.m.hold_reasons.map(function (x) { return '<option>' + h(x) + '</option>'; }).join('') + '</select><input id="bn" placeholder="Note"></div><div class="row" style="margin-top:6px"><button class="danger" id="bh">Selected HOLD karein</button><button class="warn" id="bu">Selected UNHOLD karein</button></div><label class="chk"><input type="checkbox" id="oall"> Sab dikh rahe select karein</label><div id="ol"></div></div>';
+    function drawOrders() {
+      var q = (val('oq') || '').toUpperCase(), f = open.filter(function (o) { return !q || (o.dealer_name + ' ' + (o.track_no || '')).toUpperCase().indexOf(q) >= 0; });
+      $('ol').innerHTML = f.map(function (o) { return '<label class="chk"><input type="checkbox" data-o="' + o.id + '"> <a href="#/o/' + o.id + '">' + h(o.track_no || '#' + o.id) + '</a> ' + h(o.dealer_name) + ' <span class="small muted">' + h(stageLbl(o.stage)) + ' • ' + inr(o.ordered_value) + '</span>' + (Number(o.hold) ? ' <span class="pill st-hold">HOLD</span> <span class="small short">' + h(o.hold_reason) + '</span>' : '') + '</label>'; }).join('') || '<span class="muted">Koi open order nahi.</span>';
+    }
+    drawOrders(); $('oq').oninput = drawOrders;
+    $('oall').onchange = function () { var c = this.checked; Array.prototype.forEach.call(document.querySelectorAll('[data-o]'), function (x) { x.checked = c; }); };
+    function sel() { return Array.prototype.filter.call(document.querySelectorAll('[data-o]'), function (x) { return x.checked; }).map(function (x) { return Number(x.getAttribute('data-o')); }); }
+    function bulk(un) { var ids = sel(); if (!ids.length) return toast('Order select karein', 'err'); call('bulkHold', { ids: ids, unhold: un ? 1 : 0, reason: val('br'), note: val('bn') }).then(function (r) { toast((un ? 'Unhold: ' : 'Hold: ') + r.done + (r.errors.length ? ' • skip ' + r.errors.length : '')); vHoldList(v); }).catch(fail); }
+    $('bh').onclick = function () { bulk(0); }; $('bu').onclick = function () { bulk(1); };
+    Array.prototype.forEach.call(document.querySelectorAll('[data-rm]'), function (b) { b.onclick = function () { if (!confirm('List se hatayein? (orders ka hold khud nahi hatega)')) return; call('saveHoldDealer', { id: Number(b.getAttribute('data-rm')), remove: 1 }).then(function () { toast('Hata diya'); vHoldList(v); }).catch(fail); }; });
+    $('aa').onclick = function () { var d = hl.dealers.filter(function (x) { return x.name === val('ad'); })[0]; if (!d) return toast('Dealer list se chunein', 'err'); call('saveHoldDealer', { dealer_id: d.id, why: val('aw'), brand: val('ab'), os: val('ao') }).then(function (r) { toast('Joda • ' + r.count + ' orders hold'); vHoldList(v); }).catch(fail); };
+    $('lm').onclick = function () {
+      var rows = parseHoldPaste(val('lp')); if (!rows.length) return toast('Kuch paste nahi kiya', 'err');
+      call('holdMatch', { rows: rows }).then(function (m) {
+        match = m; var bad = { sure: '', maybe: ' <span class="pill st-hold">pakka nahi</span>', none: ' <span class="pill st-hold">nahi mila</span>' };
+        $('lr').innerHTML = m.map(function (x, i) { return '<label class="chk"><input type="checkbox" data-m="' + i + '"' + (x.status === 'sure' ? ' checked' : '') + (x.status === 'none' ? ' disabled' : '') + '> ' + h(x.dealer) + ' → <b>' + h(x.master_name || '-') + '</b> <span class="small muted">' + x.score + '% • ' + h(x.why) + ' • ' + h(x.brand) + ' • OS ' + h(x.os) + '</span>' + bad[x.status] + '</label>'; }).join('') +
+          '<p class="small muted">' + m.filter(function (x) { return x.status === 'sure'; }).length + ' pakke match. "Pakka nahi" wale khud check karke tick karein.</p><button class="primary big" id="ls">List save + orders HOLD karein</button>';
+        $('ls').onclick = function () {
+          var pick = Array.prototype.filter.call(document.querySelectorAll('[data-m]'), function (x) { return x.checked; }).map(function (x) { return match[Number(x.getAttribute('data-m'))]; });
+          if (!pick.length) return toast('Koi dealer select nahi', 'err'); if (!confirm(pick.length + ' dealers ki nayi list save karein? Purani list hat jayegi.')) return;
+          call('importHoldList', { list_date: val('ld'), rows: pick }).then(function (r) { toast('List: ' + r.entries + ' dealers • ' + r.count + ' orders HOLD'); vHoldList(v); }).catch(fail);
+        };
+      }).catch(fail);
+    };
+  }).catch(function (e) { if (/Unknown action/i.test(String(e && e.message || e))) { v.innerHTML = '<div class="card center muted">Hold list abhi chalu nahi hai (server update baaki hai). Thodi der baad try karein.</div>'; return; } fail(e); });
+}
 
 // ---------------- login / setup
 function vLogin(v) {
@@ -112,7 +152,7 @@ function card(o) {
 }
 function newBtn() { return canNew() ? '<button class="sm primary" onclick="location.hash=\'#/new\'">+ New order</button>' : ''; }
 function syncBtn() { return newBtn() + (can('sync') ? '<button class="sm" id="sync">🔄 Sync now</button>' : ''); }
-function bindSync(after) { var b = $('sync'); if (b) b.onclick = function () { call('syncNow').then(function (r) { toast('Sync: ' + r.new_orders + ' naye orders, ' + r.dealers_added + ' naye dealers'); S.m = null; after(); }).catch(fail); }; }
+function bindSync(after) { var b = $('sync'); if (b) b.onclick = function () { call('syncNow').then(function (r) { toast('Sync: ' + r.new_orders + ' naye orders, ' + r.dealers_added + ' naye dealers' + (r.auto_held ? ', ' + r.auto_held + ' auto HOLD' : '')); S.m = null; after(); }).catch(fail); }; }
 function vQueue(v) {
   call('orders', {}).then(function (list) {
     v.innerHTML = '<div class="row"><h2>Meri queue (' + list.length + ')</h2>' + syncBtn() + '</div><p class="small muted">Last sync: ' + tm(S.m.last_sync) + '</p>' + (list.length ? list.map(card).join('') : '<div class="card center muted">Abhi koi kaam nahi.</div>');
