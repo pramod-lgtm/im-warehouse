@@ -230,9 +230,9 @@ function vOrder(v, id) {
     var act = '';
     if (mine) {
       if (nx === 'allocate') act = '<div class="grid2"><div>' + whoSel('w_picker', 'picker', o.picker_name, 'Pick kaun karega') + '</div><div>' + whoSel('w_checker', 'checker', o.checker_name, 'Check kaun karega') + '</div><div>' + whoSel('w_biller', 'biller', o.biller_name, 'Bill kaun karega') + '</div><div>' + whoSel('w_packer', 'packer', o.packer_name, 'Pack kaun karega') + '</div></div>';
-      else act = whoSel('w_done', STEP_ROLE[nx][0], o[STEP_ROLE[nx][1]] || (role() === STEP_ROLE[nx][0] && peopleFor(STEP_ROLE[nx][0]).length <= 1 ? S.user.name : ''), 'Kisne kiya (naam)');
-      if (nx === 'bill') act = '<div class="grid2"><div><label>Invoice no</label><input id="inv"></div><div><label>Billed qty (pcs)</label><input id="bq" type="number" value="' + h(o.picked_qty) + '"></div></div>';
-      if (nx === 'pack') act = '<label>Kitne boxes</label><input id="bx" type="number" min="1">';
+      else act = whoSel('w_done', STEP_ROLE[nx][0], o[STEP_ROLE[nx][1]] || (role() === STEP_ROLE[nx][0] ? S.user.name : ''), 'Kisne kiya (naam)');
+      if (nx === 'bill') act += '<div class="grid2"><div><label>Invoice no</label><input id="inv"></div><div><label>Billed qty (pcs)</label><input id="bq" type="number" value="' + h(o.picked_qty) + '"></div></div>';
+      if (nx === 'pack') act += '<label>Kitne boxes</label><input id="bx" type="number" min="1">';
       act += '<button class="good big" id="stepb" style="margin-top:10px">✔ ' + STEPS.filter(function (s) { return s[0] === nx; })[0][3] + ' confirm</button>';
     }
     var hold = '';
