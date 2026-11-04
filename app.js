@@ -183,10 +183,36 @@ function card(o) {
 function newBtn() { return canNew() ? '<button class="sm primary" onclick="location.hash=\'#/new\'">+ New order</button>' : ''; }
 function syncBtn() { return newBtn() + (can('sync') ? '<button class="sm" id="sync">🔄 Sync now</button>' : ''); }
 function bindSync(after) { var b = $('sync'); if (b) b.onclick = function () { call('syncNow').then(function (r) { toast('Sync: ' + r.new_orders + ' naye orders, ' + r.dealers_added + ' naye dealers' + (r.auto_held ? ', ' + r.auto_held + ' auto HOLD' : '')); S.m = null; after(); }).catch(fail); }; }
+// Meri queue date filter (client-side, by order_date; show_from still applies on the server)
+function addDays(d, n) { return new Date(Date.parse(d + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10); }
+function qRange(k, d1, d2) {
+  var t = today(), dow = (new Date(t + 'T00:00:00Z').getUTCDay() + 6) % 7; // Monday = 0
+  switch (k) {
+    case 'today': return [t, t]; case 'yday': var y = addDays(t, -1); return [y, y];
+    case 'week': return [addDays(t, -dow), t]; case 'month': return [t.slice(0, 8) + '01', t];
+    case 'date': return d1 ? [d1, d1] : null; case 'range': return d1 || d2 ? [d1 || '0000-00-00', d2 || '9999-12-31'] : null;
+    default: return null;
+  }
+}
 function vQueue(v) {
   call('orders', {}).then(function (list) {
-    v.innerHTML = '<div class="row"><h2>Meri queue (' + list.length + ')</h2>' + syncBtn() + '</div><p class="small muted">Last sync: ' + tm(S.m.last_sync) + '</p>' + (list.length ? list.map(card).join('') : '<div class="card center muted">Abhi koi kaam nahi.</div>');
-    bindSync(function () { vQueue(v); });
+    var k = LS.getItem('imw_qf') || '', d1 = LS.getItem('imw_qd1') || '', d2 = LS.getItem('imw_qd2') || '';
+    var opts = [['', 'Sab dates'], ['today', 'Aaj'], ['yday', 'Kal'], ['week', 'Is hafte'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
+    v.innerHTML = '<div class="row"><h2>Meri queue (<span id="qn">' + list.length + '</span>)</h2>' + syncBtn() + '</div><p class="small muted">Last sync: ' + tm(S.m.last_sync) + '</p>' +
+      '<div class="row"><select id="qf">' + opts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === k ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
+      '<input type="date" id="qd1" value="' + h(d1) + '" title="Date / From"><input type="date" id="qd2" value="' + h(d2) + '" title="To"></div><p class="small" id="qsum"></p><div id="qlst"></div>';
+    function draw() {
+      $('qd1').style.display = k === 'date' || k === 'range' ? '' : 'none'; $('qd2').style.display = k === 'range' ? '' : 'none';
+      var r = qRange(k, d1, d2), f = r ? list.filter(function (o) { var d = String(o.order_date || ''); return d >= r[0] && d <= r[1]; }) : list;
+      var tp = f.reduce(function (a, o) { return a + (Number(o.pcs) || 0); }, 0);
+      $('qn').textContent = f.length + (r ? ' / ' + list.length : '');
+      $('qsum').innerHTML = r ? 'Order date ' + h(dmy(r[0] === '0000-00-00' ? '' : r[0]) || '...') + ' se ' + h(dmy(r[1] === '9999-12-31' ? '' : r[1]) || '...') + ': <b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>' : 'Sab: <b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>';
+      $('qlst').innerHTML = f.length ? f.map(card).join('') : '<div class="card center muted">' + (r ? 'Is period mein koi kaam nahi.' : 'Abhi koi kaam nahi.') + '</div>';
+    }
+    $('qf').onchange = function () { k = this.value; LS.setItem('imw_qf', k); if ((k === 'date' || k === 'range') && !d1) { d1 = today(); $('qd1').value = d1; LS.setItem('imw_qd1', d1); } draw(); };
+    $('qd1').onchange = function () { d1 = this.value; LS.setItem('imw_qd1', d1); draw(); };
+    $('qd2').onchange = function () { d2 = this.value; LS.setItem('imw_qd2', d2); draw(); };
+    draw(); bindSync(function () { vQueue(v); });
   }).catch(fail);
 }
 function vAll(v) {
