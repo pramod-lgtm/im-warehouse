@@ -35,7 +35,7 @@ function ono(o) { return o.order_no || (/^W-/.test(o.src_id) ? o.src_id : '#' + 
 function trk(o) { return o.track_no ? '<span class="trk">' + h(o.track_no) + '</span> ' : ''; }
 function srcOf(o) { return o.source || 'Sales Tracker'; }
 function canNew() { return ['admin', 'warehouse_manager', 'dispatch'].indexOf(role()) >= 0; }
-function badges(o) { return ' <span class="pill src">' + h(srcOf(o)) + '</span>' + (o.priority === 'Urgent' ? ' <span class="pill st-hold">URGENT</span>' : ''); }
+function badges(o) { return ' <span class="pill src">' + h(srcOf(o)) + '</span>' + (o.priority === 'Urgent' ? ' <span class="pill st-hold">URGENT</span>' : '') + ((o.dups || []).length ? ' <span class="pill st-hold" title="Same dealer + brand, paas ki date">⚠ Possible duplicate</span>' : ''); }
 function pill(o) { return '<span class="pill st-' + h(o.stage) + '">' + h(stageLbl(o.stage)) + '</span>' + (o.stage === 'new' && Number(o.needs_punch) ? ' <span class="pill st-hold">Trylo: punching baaki</span>' : '') + (Number(o.hold) ? ' <span class="pill st-hold">HOLD</span>' : ''); }
 // ---------------- SLA (bill within deadline)
 var SLA_CLS = { 'On time': 'sla-ok', 'Due soon': 'sla-soon', 'Delayed': 'sla-late', 'Waiting for stock': 'sla-wait' };
@@ -86,7 +86,7 @@ function route() {
     if (p.indexOf('/o/') === 0) return vOrder(v, Number(p.slice(3)));
     if (p === '/new') return vNew(v, null);
     if (p.indexOf('/edit/') === 0) return call('order', { id: Number(p.slice(6)) }).then(function (r) { vNew(v, r.order); }).catch(fail);
-    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/dash': vDash, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList }[p] || vQueue; f(v);
+    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/dash': vDash, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList, '/dup': vDups }[p] || vQueue; f(v);
   }).catch(fail);
 }
 window.addEventListener('hashchange', route);
@@ -193,13 +193,48 @@ function vAll(v) {
   call('orders', { all: 1 }).then(function (list) {
     var st = LS.getItem('imw_f') || '', sf = LS.getItem('imw_sf') || '';
     function draw() {
-      var f = list.filter(function (o) { return (!st || (st === 'hold' ? Number(o.hold) : st === 'punch_pending' ? o.stage === 'new' && Number(o.needs_punch) : o.stage === st)) && (!sf || srcOf(o) === sf); }), q = (val('q') || '').toUpperCase();
+      var f = list.filter(function (o) { return (!st || (st === 'hold' ? Number(o.hold) : st === 'dup' ? (o.dups || []).length : st === 'punch_pending' ? o.stage === 'new' && Number(o.needs_punch) : o.stage === st)) && (!sf || srcOf(o) === sf); }), q = (val('q') || '').toUpperCase();
       if (q) f = f.filter(function (o) { return (o.track_no + ' ' + ono(o) + ' ' + o.dealer_name + ' ' + o.zone + ' ' + o.area + ' ' + o.route + ' ' + o.invoice_no).toUpperCase().indexOf(q) >= 0; });
       $('lst').innerHTML = f.map(card).join('') || '<div class="card center muted">Kuch nahi</div>';
     }
-    v.innerHTML = '<div class="row"><h2>Sab orders</h2>' + syncBtn() + '<button class="sm" id="ex">CSV</button></div><div class="row"><select id="st"><option value="">Sab stage</option>' + S.m.stages.map(function (s) { return '<option value="' + s + '"' + (st === s ? ' selected' : '') + '>' + h(stageLbl(s)) + '</option>'; }).join('') + '<option value="punch_pending"' + (st === 'punch_pending' ? ' selected' : '') + '>Trylo: punching baaki</option><option value="hold"' + (st === 'hold' ? ' selected' : '') + '>HOLD</option><option value="cancelled"' + (st === 'cancelled' ? ' selected' : '') + '>Cancel</option></select><select id="sf"><option value="">Sab source</option>' + ['Sales Tracker'].concat(S.m.sources || []).map(function (x) { return '<option' + (x === sf ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select><input id="q" placeholder="Tracking no / order no / dealer / area / invoice"></div><div id="lst" style="margin-top:10px"></div>';
+    v.innerHTML = '<div class="row"><h2>Sab orders</h2>' + syncBtn() + '<button class="sm" id="ex">CSV</button>' + (function (n) { return n ? '<a class="btn sm danger" href="#/dup">⚠ Duplicates (' + n + ')</a>' : ''; })(list.filter(function (o) { return (o.dups || []).length; }).length) + '</div><div class="row"><select id="st"><option value="">Sab stage</option>' + S.m.stages.map(function (s) { return '<option value="' + s + '"' + (st === s ? ' selected' : '') + '>' + h(stageLbl(s)) + '</option>'; }).join('') + '<option value="punch_pending"' + (st === 'punch_pending' ? ' selected' : '') + '>Trylo: punching baaki</option><option value="hold"' + (st === 'hold' ? ' selected' : '') + '>HOLD</option><option value="dup"' + (st === 'dup' ? ' selected' : '') + '>⚠ Possible duplicates</option><option value="cancelled"' + (st === 'cancelled' ? ' selected' : '') + '>Cancel</option></select><select id="sf"><option value="">Sab source</option>' + ['Sales Tracker'].concat(S.m.sources || []).map(function (x) { return '<option' + (x === sf ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select><input id="q" placeholder="Tracking no / order no / dealer / area / invoice"></div><div id="lst" style="margin-top:10px"></div>';
     $('st').onchange = function () { st = this.value; LS.setItem('imw_f', st); draw(); }; $('sf').onchange = function () { sf = this.value; LS.setItem('imw_sf', sf); draw(); }; $('q').oninput = draw; draw(); bindSync(function () { vAll(v); });
     $('ex').onclick = function () { call('exportOrders').then(function (r) { csv(r, 'warehouse-orders'); }).catch(fail); };
+  }).catch(fail);
+}
+
+// ---------------- possible duplicates (salesman + warehouse entered the same order)
+function dupLine(o) { return (o.lines || []).map(function (l) { return h(l.brand) + ' ' + pcs(l.ordered_qty); }).join(' + ') + ' = <b>' + pcs(o.pcs) + '</b> pcs'; }
+function dupCard(o, others) {
+  if (!others || !others.length || !isMgr()) return '';
+  return '<div class="card" style="border:2px solid #c0392b"><h3>⚠ Possible duplicate (' + others.length + ')</h3><p class="small muted">Same dealer + same brand, paas ki date. Salesman aur warehouse dono ne order daala ho sakta hai.</p>' +
+    others.map(function (x) { return '<div class="chk"><a href="#/o/' + x.id + '">' + trk(x) + h(ono(x)) + '</a><span class="small">' + h(srcOf(x)) + ' • ' + h(dmy(x.order_date)) + ' • ' + dupLine(x) + ' • ' + h(stageLbl(x.stage)) + '</span><button class="sm primary dupm" data-id="' + x.id + '">Merge</button><button class="sm dupn" data-id="' + x.id + '">Not duplicate</button></div>'; }).join('') + '</div>';
+}
+function dupSide(x, name) {
+  return '<div class="card"><label><input type="radio" name="dk" value="' + x.id + '"> <b>Ye rakhein</b></label><div><b>' + trk(x) + h(ono(x)) + '</b></div><div class="small">' + h(srcOf(x)) + (x.salesman ? ' • salesman ' + h(x.salesman) : '') + (x.taken_by ? ' • liya ' + h(x.taken_by) : '') + '</div><div class="small">' + h(dmy(x.order_date)) + ' ' + tm(x.src_at || x.created_at) + '</div><div class="small">' + dupLine(x) + '</div><div class="small">' + h(stageLbl(x.stage)) + (Number(x.hold) ? ' • HOLD' : '') + '</div>' + (x.remarks ? '<div class="small muted">Remark: ' + h(x.remarks) + '</div>' : '') + '</div>';
+}
+function mergeDialog(a, b, done) {
+  sheet('<h3>Duplicate merge</h3><p class="small muted">' + h(a.dealer_name) + '. Jo order rakhna hai use chunein. Doosra "Merge ho gaya" ho jayega (delete nahi hota, queue se hat jata hai).</p><div class="grid2">' + dupSide(a) + dupSide(b) + '</div>' +
+    '<label><input type="radio" name="dmode" value="keep" checked> Sirf ek rakhein (pcs nahi jodne)</label><label><input type="radio" name="dmode" value="add"> Pcs add karein (doosre order ke pcs brand-wise jod do)</label>' +
+    '<button class="primary big" id="dms" style="margin-top:10px">Merge karein</button>');
+  var def = /^W-/.test(a.src_id) ? b.id : a.id; var r0 = document.querySelector('input[name=dk][value="' + def + '"]'); if (r0) r0.checked = true; // default keep the Sales Tracker order
+  $('dms').onclick = function () {
+    var k = document.querySelector('input[name=dk]:checked'); if (!k) return toast('Kaunsa rakhna hai chunein', 'err');
+    var keep = Number(k.value), drop = keep === Number(a.id) ? b.id : a.id, add = document.querySelector('input[name=dmode]:checked').value === 'add';
+    if (!confirm('Order ' + ono(keep === Number(a.id) ? b : a) + ' merge (hide) karein?')) return;
+    call('mergeOrders', { keep_id: keep, drop_id: drop, add_pcs: add ? 1 : 0 }).then(function (x) { toast('Merge ho gaya ✔'); var sh = document.querySelector('.sheet'); if (sh) sh.remove(); done(x.kept); }).catch(fail);
+  };
+}
+function bindDup(v, o, others) {
+  Array.prototype.forEach.call(document.querySelectorAll('.dupm'), function (btn) { btn.onclick = function () { var x = (others || []).filter(function (y) { return Number(y.id) === Number(btn.dataset.id); })[0]; if (x) mergeDialog(o, x, function (kept) { go('/o/' + kept); }); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('.dupn'), function (btn) { btn.onclick = function () { if (!confirm('Ye duplicate nahi hai? Flag hamesha ke liye hat jayega.')) return; call('dismissDup', { a: o.id, b: Number(btn.dataset.id) }).then(function () { toast('Flag hata diya'); vOrder(v, o.id); }).catch(fail); }; });
+}
+function vDups(v) {
+  call('dupList').then(function (list) {
+    v.innerHTML = '<div class="row"><h2>⚠ Possible duplicates (' + list.length + ')</h2></div><p class="small muted">Same dealer + same brand, order date ' + h((S.m.dup_days != null ? S.m.dup_days : 2)) + ' din ke andar, ek Sales Tracker aur ek warehouse (W-) order. Bill se pehle wale orders hi.</p>' +
+      (list.map(function (p, i) { return '<div class="card"><div><b>' + h(p.a.dealer_name) + '</b> <span class="small muted">' + h(p.brands.join(', ')) + ' • ' + p.days + ' din ka fark</span></div><div class="grid2"><div class="small"><a href="#/o/' + p.a.id + '">' + trk(p.a) + h(ono(p.a)) + '</a> ' + h(srcOf(p.a)) + '<br>' + h(dmy(p.a.order_date)) + ' • ' + dupLine(p.a) + '</div><div class="small"><a href="#/o/' + p.b.id + '">' + trk(p.b) + h(ono(p.b)) + '</a> ' + h(srcOf(p.b)) + '<br>' + h(dmy(p.b.order_date)) + ' • ' + dupLine(p.b) + '</div></div><div class="row"><button class="sm primary" data-m="' + i + '">Merge</button><button class="sm" data-n="' + i + '">Not duplicate</button></div></div>'; }).join('') || '<div class="card center muted">Koi possible duplicate nahi 👍</div>');
+    Array.prototype.forEach.call(v.querySelectorAll('[data-m]'), function (b) { b.onclick = function () { var p = list[b.dataset.m]; mergeDialog(p.a, p.b, function () { vDups(v); }); }; });
+    Array.prototype.forEach.call(v.querySelectorAll('[data-n]'), function (b) { b.onclick = function () { var p = list[b.dataset.n]; if (!confirm('Ye duplicate nahi hai?')) return; call('dismissDup', { a: p.a.id, b: p.b.id }).then(function () { toast('Flag hata diya'); vDups(v); }).catch(fail); }; });
   }).catch(fail);
 }
 
@@ -245,7 +280,7 @@ function vOrder(v, id) {
       '<div class="small muted">Source: ' + h(srcOf(o)) + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.salesman ? ' • salesman: ' + h(o.salesman) : '') + (o.expected_date ? ' • expected dispatch ' + h(dmy(o.expected_date)) : '') + (o.edited_at ? ' • edited ' + tm(o.edited_at) + ' ' + h(o.edited_by) : '') + '</div>' +
       (o.stage === 'cancelled' ? '<div class="short">Cancel: ' + h(o.cancel_reason) + ' (' + tm(o.cancelled_at) + ', ' + h(o.cancelled_by) + ')</div>' : '') +
       (manEdit ? '<div class="row" style="margin-top:8px"><a class="btn sm" href="#/edit/' + o.id + '">✏️ Edit</a><button class="sm danger" id="cnl">Cancel order</button></div>' : '') + '</div>' +
-      (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + tl + act + '</div>' + waitCard(o) + hold + del + nb;
+      (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + dupCard(o, r.dup_orders) + (o.merged_into ? '<div class="card short">Ye order duplicate tha, <a href="#/o/' + h(o.merged_into) + '">' + h((o.merged_into_order && (o.merged_into_order.track_no || o.merged_into_order.order_no)) || '#' + o.merged_into) + '</a> mein merge hua (' + tm(o.merged_at) + ', ' + h(o.merged_by) + ')</div>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + tl + act + '</div>' + waitCard(o) + hold + del + nb;
     var b = $('stepb'); if (b) b.onclick = function () {
       var d = { id: o.id, action: nx };
       if (nx === 'allocate') {
@@ -268,6 +303,7 @@ function vOrder(v, id) {
       $('rts').onclick = function () { var t = val('rtv'); if (!t) return toast('Time daalein', 'err'); call('setReceivedTime', { id: o.id, received_at: t, note: val('rtn') }).then(function (x) { toast('Nayi bill deadline: ' + tm(x.sla && x.sla.deadline)); var sh = document.querySelector('.sheet'); if (sh) sh.remove(); vOrder(v, o.id); }).catch(fail); };
     };
     if ($('wsv')) $('wsv').onclick = function () { var b = Array.prototype.filter.call(document.querySelectorAll('.wb'), function (i) { return i.checked; }).map(function (i) { return i.value; }); call('waitPurchase', { id: o.id, brands: b }).then(function () { toast(b.length ? 'Waiting for purchase - ' + b.join(', ') : 'Stock wait hata diya'); vOrder(v, id); }).catch(fail); };
+    bindDup(v, o, r.dup_orders);
     if ($('unh')) $('unh').onclick = function () { call('unhold', { id: o.id }).then(function () { toast('Unhold'); vOrder(v, id); }).catch(fail); };
     if ($('delb')) $('delb').onclick = function () { call('delivery', delData([o.id])).then(function () { toast('Delivery saved'); vOrder(v, id); }).catch(fail); };
   }).catch(fail);
