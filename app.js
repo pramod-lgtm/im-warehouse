@@ -29,13 +29,24 @@ function signOut(local) { if (!local) call('logout', {}, true).catch(function ()
 function masters(force) { if (S.m && !force) return Promise.resolve(S.m); return call('masters').then(function (m) { S.m = m; return m; }); }
 function role() { return S.user && S.user.role; }
 function isMgr() { return role() === 'admin' || role() === 'warehouse_manager'; }
-function can(p) { var P = { view: ['admin', 'warehouse_manager'], bills: ['admin', 'warehouse_manager', 'biller'], hold: ['admin', 'warehouse_manager', 'biller', 'coordinator'], holdmgr: ['admin', 'warehouse_manager', 'coordinator'], delivery: ['admin', 'warehouse_manager', 'dispatch'], sync: ['admin', 'warehouse_manager', 'biller'], manage: ['admin'], recvtime: ['admin', 'warehouse_manager'] }; return (P[p] || []).indexOf(role()) >= 0; }
+function can(p) { var P = { view: ['admin', 'warehouse_manager'], bills: ['admin', 'warehouse_manager', 'biller'], hold: ['admin', 'warehouse_manager', 'biller', 'coordinator'], holdmgr: ['admin', 'warehouse_manager', 'coordinator'], delivery: ['admin', 'warehouse_manager', 'dispatch'], sync: ['admin', 'warehouse_manager', 'biller'], manage: ['admin'], recvtime: ['admin', 'warehouse_manager'], routes: ['admin', 'warehouse_manager', 'coordinator'] }; return (P[p] || []).indexOf(role()) >= 0; }
 function stageLbl(s) { return (S.m && S.m.stage_label[s]) || s; }
 function ono(o) { return o.order_no || (/^W-/.test(o.src_id) ? o.src_id : '#' + o.id); }
 function trk(o) { return o.track_no ? '<span class="trk">' + h(o.track_no) + '</span> ' : ''; }
 function srcOf(o) { return o.source || 'Sales Tracker'; }
 function canNew() { return ['admin', 'warehouse_manager', 'dispatch'].indexOf(role()) >= 0; }
-function badges(o) { return ' <span class="pill src">' + h(srcOf(o)) + '</span>' + (o.priority === 'Urgent' ? ' <span class="pill st-hold">URGENT</span>' : '') + ((o.dups || []).length ? ' <span class="pill st-hold" title="Same dealer + brand, paas ki date">⚠ Possible duplicate</span>' : ''); }
+function planBadge(o) {
+  if (!o || (!o.plan_delivery_date && !o.plan_flag && !o.plan_mode)) return '';
+  var bits = [];
+  if (o.plan_delivery_date) bits.push('<span class="pill" title="Plan delivery">📅 ' + h(dmy(o.plan_delivery_date)) + (o.plan_van ? ' · ' + h(String(o.plan_van).replace(/^DL1L?A?P?-?|^DL1LZ-?/,'')) : '') + '</span>');
+  if (o.plan_mode && o.plan_mode !== 'van') bits.push('<span class="pill src">' + h(o.plan_mode) + '</span>');
+  if (o.plan_flag === 'no_guarantee') bits.push('<span class="pill st-hold" title="Real-time nahi">No guarantee</span>');
+  if (o.plan_flag === 'beyond_48h') bits.push('<span class="pill st-hold">&gt;48h</span>');
+  if (o.plan_flag === 'unmapped') bits.push('<span class="pill st-hold">Unmapped area</span>');
+  if (Number(o.plan_override)) bits.push('<span class="pill src">Override</span>');
+  return bits.length ? ' ' + bits.join(' ') : '';
+}
+function badges(o) { return ' <span class="pill src">' + h(srcOf(o)) + '</span>' + (o.priority === 'Urgent' ? ' <span class="pill st-hold">URGENT</span>' : '') + ((o.dups || []).length ? ' <span class="pill st-hold" title="Same dealer + brand, paas ki date">⚠ Possible duplicate</span>' : '') + planBadge(o); }
 function pill(o) { return '<span class="pill st-' + h(o.stage) + '">' + h(stageLbl(o.stage)) + '</span>' + (o.stage === 'new' && Number(o.needs_punch) ? ' <span class="pill st-hold">Trylo: punching baaki</span>' : '') + (Number(o.hold) ? ' <span class="pill st-hold">HOLD</span>' : ''); }
 // ---------------- SLA (bill within deadline)
 var SLA_CLS = { 'On time': 'sla-ok', 'Due soon': 'sla-soon', 'Delayed': 'sla-late', 'Waiting for stock': 'sla-wait' };
@@ -70,7 +81,7 @@ function sheet(html) { var d = document.createElement('div'); d.className = 'she
 
 // ---------------- router
 function go(p) { if (location.hash !== '#' + p) location.hash = '#' + p; else route(); }
-var NAV = [['/q', '📋', 'Meri queue', null], ['/all', '🏬', 'Sab orders', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/dash', '📊', 'Dashboard', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
+var NAV = [['/q', '📋', 'Meri queue', null], ['/all', '🏬', 'Sab orders', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
 function nav(cur) {
   var n = $('nav'); if (!S.user) { n.classList.add('hidden'); return; }
   n.innerHTML = NAV.filter(function (x) { return !x[3] || can(x[3]); }).map(function (x) { return '<a href="#' + x[0] + '" class="' + (cur.indexOf(x[0]) === 0 ? 'on' : '') + '"><i>' + x[1] + '</i>' + x[2] + '</a>'; }).join('');
@@ -86,7 +97,7 @@ function route() {
     if (p.indexOf('/o/') === 0) return vOrder(v, Number(p.slice(3)));
     if (p === '/new') return vNew(v, null);
     if (p.indexOf('/edit/') === 0) return call('order', { id: Number(p.slice(6)) }).then(function (r) { vNew(v, r.order); }).catch(fail);
-    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/dash': vDash, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList, '/dup': vDups }[p] || vQueue; f(v);
+    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/kal': vKalDelivery, '/van': vVanPlan, '/dash': vDash, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList, '/dup': vDups }[p] || vQueue; f(v);
   }).catch(fail);
 }
 window.addEventListener('hashchange', route);
@@ -175,7 +186,7 @@ function vSetup(v) {
 // ---------------- lists
 function card(o) {
   return '<a class="card" style="display:block;text-decoration:none;color:inherit" href="#/o/' + o.id + '"><div class="row"><b>' + trk(o) + h(ono(o)) + ' ' + h(o.dealer_name) + '</b><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div>' +
-    '<div class="small">' + slaBadge(o) + '</div><div class="small muted">' + h(dmy(o.order_date)) + ' • ' + (o.zone ? '<b>' + h(o.zone) + '</b> / ' : '') + h(o.area || 'area ?') + (o.route ? ' • ' + h(o.route) : '') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.salesman ? ' • ' + h(o.salesman) : '') + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.expected_date ? ' • exp ' + h(dmy(o.expected_date)) : '') + '</div>' +
+    '<div class="small">' + slaBadge(o) + '</div><div class="small muted">' + h(dmy(o.order_date)) + ' • ' + (o.zone ? '<b>' + h(o.zone) + '</b> / ' : '') + h(o.area || 'area ?') + (o.route ? ' • ' + h(o.route) : '') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.salesman ? ' • ' + h(o.salesman) : '') + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.expected_date ? ' • exp ' + h(dmy(o.expected_date)) : '') + (o.plan_delivery_date ? ' • plan ' + h(dmy(o.plan_delivery_date)) + (o.plan_van ? ' ' + h(o.plan_van) : '') : '') + '</div>' +
     '<div class="small">' + (o.lines || []).map(function (l) { return h(l.brand) + ' ' + pcs(l.ordered_qty); }).join(' + ') + ((o.lines || []).length > 1 ? ' = <b>' + pcs(o.pcs) + '</b>' : '') +
     [['Punch', o.punch_name], ['P', o.picker_name], ['C', o.checker_name], ['B', o.biller_name], ['Pk', o.packer_name]].filter(function (x) { return x[1]; }).map(function (x) { return ' • ' + x[0] + ': ' + h(x[1]); }).join('') + (o.invoice_no ? ' • Inv ' + h(o.invoice_no) : '') + (o.vehicle || o.delivery_mode ? ' • ' + h(o.vehicle || o.delivery_mode) : '') + '</div>' +
     (Number(o.hold) ? '<div class="small short">Hold: ' + h(o.hold_reason) + ' ' + h(o.hold_note) + '</div>' : '') + (o.stage === 'cancelled' ? '<div class="small short">Cancel: ' + h(o.cancel_reason) + '</div>' : '') + '</a>';
@@ -217,14 +228,20 @@ function vQueue(v) {
 }
 function vAll(v) {
   call('orders', { all: 1 }).then(function (list) {
-    var st = LS.getItem('imw_f') || '', sf = LS.getItem('imw_sf') || '';
+    var st = LS.getItem('imw_f') || '', sf = LS.getItem('imw_sf') || '', pv = LS.getItem('imw_pv') || '', pd = LS.getItem('imw_pd') || '';
+    var vans = (S.m.van_plan && S.m.van_plan.vans) || ['DL1LAP-0938', 'DL1LZ-6422'];
     function draw() {
-      var f = list.filter(function (o) { return (!st || (st === 'hold' ? Number(o.hold) : st === 'dup' ? (o.dups || []).length : st === 'punch_pending' ? o.stage === 'new' && Number(o.needs_punch) : o.stage === st)) && (!sf || srcOf(o) === sf); }), q = (val('q') || '').toUpperCase();
-      if (q) f = f.filter(function (o) { return (o.track_no + ' ' + ono(o) + ' ' + o.dealer_name + ' ' + o.zone + ' ' + o.area + ' ' + o.route + ' ' + o.invoice_no).toUpperCase().indexOf(q) >= 0; });
+      var f = list.filter(function (o) {
+        var ok = !st || (st === 'hold' ? Number(o.hold) : st === 'dup' ? (o.dups || []).length : st === 'punch_pending' ? o.stage === 'new' && Number(o.needs_punch) : st === 'unmapped' ? (o.plan_flag === 'unmapped' || /^unmapped$/i.test(String(o.zone || '')) || !String(o.area || '').trim()) : st === 'kal' ? String(o.plan_delivery_date) === addDays(today(), 1) : st === 'aaj_plan' ? String(o.plan_delivery_date) === today() : o.stage === st);
+        return ok && (!sf || srcOf(o) === sf) && (!pv || String(o.plan_van) === pv) && (!pd || String(o.plan_delivery_date) === pd);
+      }), q = (val('q') || '').toUpperCase();
+      if (q) f = f.filter(function (o) { return (o.track_no + ' ' + ono(o) + ' ' + o.dealer_name + ' ' + o.zone + ' ' + o.area + ' ' + o.route + ' ' + o.invoice_no + ' ' + (o.plan_van || '')).toUpperCase().indexOf(q) >= 0; });
       $('lst').innerHTML = f.map(card).join('') || '<div class="card center muted">Kuch nahi</div>';
     }
-    v.innerHTML = '<div class="row"><h2>Sab orders</h2>' + syncBtn() + '<button class="sm" id="ex">CSV</button>' + (function (n) { return n ? '<a class="btn sm danger" href="#/dup">⚠ Duplicates (' + n + ')</a>' : ''; })(list.filter(function (o) { return (o.dups || []).length; }).length) + '</div><div class="row"><select id="st"><option value="">Sab stage</option>' + S.m.stages.map(function (s) { return '<option value="' + s + '"' + (st === s ? ' selected' : '') + '>' + h(stageLbl(s)) + '</option>'; }).join('') + '<option value="punch_pending"' + (st === 'punch_pending' ? ' selected' : '') + '>Trylo: punching baaki</option><option value="hold"' + (st === 'hold' ? ' selected' : '') + '>HOLD</option><option value="dup"' + (st === 'dup' ? ' selected' : '') + '>⚠ Possible duplicates</option><option value="cancelled"' + (st === 'cancelled' ? ' selected' : '') + '>Cancel</option></select><select id="sf"><option value="">Sab source</option>' + ['Sales Tracker'].concat(S.m.sources || []).map(function (x) { return '<option' + (x === sf ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select><input id="q" placeholder="Tracking no / order no / dealer / area / invoice"></div><div id="lst" style="margin-top:10px"></div>';
-    $('st').onchange = function () { st = this.value; LS.setItem('imw_f', st); draw(); }; $('sf').onchange = function () { sf = this.value; LS.setItem('imw_sf', sf); draw(); }; $('q').oninput = draw; draw(); bindSync(function () { vAll(v); });
+    v.innerHTML = '<div class="row"><h2>Sab orders</h2>' + syncBtn() + '<button class="sm" id="ex">CSV</button>' + (function (n) { return n ? '<a class="btn sm danger" href="#/dup">⚠ Duplicates (' + n + ')</a>' : ''; })(list.filter(function (o) { return (o.dups || []).length; }).length) + '</div><div class="row"><select id="st"><option value="">Sab stage</option>' + S.m.stages.map(function (s) { return '<option value="' + s + '"' + (st === s ? ' selected' : '') + '>' + h(stageLbl(s)) + '</option>'; }).join('') + '<option value="punch_pending"' + (st === 'punch_pending' ? ' selected' : '') + '>Trylo: punching baaki</option><option value="hold"' + (st === 'hold' ? ' selected' : '') + '>HOLD</option><option value="dup"' + (st === 'dup' ? ' selected' : '') + '>⚠ Possible duplicates</option><option value="aaj_plan"' + (st === 'aaj_plan' ? ' selected' : '') + '>Aaj plan delivery</option><option value="kal"' + (st === 'kal' ? ' selected' : '') + '>Kal plan delivery</option><option value="unmapped"' + (st === 'unmapped' ? ' selected' : '') + '>Unmapped area</option><option value="cancelled"' + (st === 'cancelled' ? ' selected' : '') + '>Cancel</option></select><select id="sf"><option value="">Sab source</option>' + ['Sales Tracker'].concat(S.m.sources || []).map(function (x) { return '<option' + (x === sf ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select></div><div class="row"><select id="pv"><option value="">Sab van</option>' + vans.map(function (x) { return '<option value="' + h(x) + '"' + (x === pv ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select><input type="date" id="pd" value="' + h(pd) + '" title="Plan delivery date"><input id="q" placeholder="Tracking / dealer / area / van"></div><div id="lst" style="margin-top:10px"></div>';
+    $('st').onchange = function () { st = this.value; LS.setItem('imw_f', st); draw(); }; $('sf').onchange = function () { sf = this.value; LS.setItem('imw_sf', sf); draw(); };
+    $('pv').onchange = function () { pv = this.value; LS.setItem('imw_pv', pv); draw(); }; $('pd').onchange = function () { pd = this.value; LS.setItem('imw_pd', pd); draw(); };
+    $('q').oninput = draw; draw(); bindSync(function () { vAll(v); });
     $('ex').onclick = function () { call('exportOrders').then(function (r) { csv(r, 'warehouse-orders'); }).catch(fail); };
   }).catch(fail);
 }
@@ -306,7 +323,7 @@ function vOrder(v, id) {
       '<div class="small muted">Source: ' + h(srcOf(o)) + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.salesman ? ' • salesman: ' + h(o.salesman) : '') + (o.expected_date ? ' • expected dispatch ' + h(dmy(o.expected_date)) : '') + (o.edited_at ? ' • edited ' + tm(o.edited_at) + ' ' + h(o.edited_by) : '') + '</div>' +
       (o.stage === 'cancelled' ? '<div class="short">Cancel: ' + h(o.cancel_reason) + ' (' + tm(o.cancelled_at) + ', ' + h(o.cancelled_by) + ')</div>' : '') +
       (manEdit ? '<div class="row" style="margin-top:8px"><a class="btn sm" href="#/edit/' + o.id + '">✏️ Edit</a><button class="sm danger" id="cnl">Cancel order</button></div>' : '') + '</div>' +
-      (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + dupCard(o, r.dup_orders) + (o.merged_into ? '<div class="card short">Ye order duplicate tha, <a href="#/o/' + h(o.merged_into) + '">' + h((o.merged_into_order && (o.merged_into_order.track_no || o.merged_into_order.order_no)) || '#' + o.merged_into) + '</a> mein merge hua (' + tm(o.merged_at) + ', ' + h(o.merged_by) + ')</div>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + tl + act + '</div>' + waitCard(o) + hold + del + nb;
+      (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + dupCard(o, r.dup_orders) + (o.merged_into ? '<div class="card short">Ye order duplicate tha, <a href="#/o/' + h(o.merged_into) + '">' + h((o.merged_into_order && (o.merged_into_order.track_no || o.merged_into_order.order_no)) || '#' + o.merged_into) + '</a> mein merge hua (' + tm(o.merged_at) + ', ' + h(o.merged_by) + ')</div>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + tl + act + '</div>' + waitCard(o) + planCard(o) + hold + del + nb;
     var b = $('stepb'); if (b) b.onclick = function () {
       var d = { id: o.id, action: nx };
       if (nx === 'allocate') {
@@ -332,6 +349,8 @@ function vOrder(v, id) {
     bindDup(v, o, r.dup_orders);
     if ($('unh')) $('unh').onclick = function () { call('unhold', { id: o.id }).then(function () { toast('Unhold'); vOrder(v, id); }).catch(fail); };
     if ($('delb')) $('delb').onclick = function () { call('delivery', delData([o.id])).then(function () { toast('Delivery saved'); vOrder(v, id); }).catch(fail); };
+    if ($('pov')) $('pov').onclick = function () { call('overridePlan', { id: o.id, plan_delivery_date: val('pdd'), plan_van: val('pdv'), plan_mode: val('pdm') }).then(function () { toast('Plan override saved'); vOrder(v, id); }).catch(fail); };
+    if ($('pcl')) $('pcl').onclick = function () { call('overridePlan', { id: o.id, clear: 1 }).then(function () { toast('Override hata, auto plan'); vOrder(v, id); }).catch(fail); };
   }).catch(fail);
 }
 function waitCard(o) {
@@ -342,6 +361,17 @@ function waitCard(o) {
     br.map(function (b) { return '<label class="chk"><input type="checkbox" class="wb" value="' + h(b) + '"' + (cur.indexOf(b) >= 0 ? ' checked' : '') + '> Waiting for purchase - ' + h(b) + '</label>'; }).join('') +
     (cur.length ? '<div class="small muted">Lagaya: ' + tm(o.wait_at) + ' • ' + h(o.wait_by) + '</div>' : '') + '<button class="warn" id="wsv" style="margin-top:8px">Save</button> <a class="btn sm" href="#/pr">📦 Purchase aaya</a></div>';
 }
+function planCard(o) {
+  if (!o || (o.stage === 'cancelled' && !o.plan_delivery_date)) return '';
+  var vans = (S.m.van_plan && S.m.van_plan.vans) || ['DL1LAP-0938', 'DL1LZ-6422'];
+  var canEdit = can('routes') && o.stage !== 'dispatched';
+  return '<div class="card"><h3>Van / delivery plan</h3>' +
+    '<div class="small">Plan date: <b>' + h(dmy(o.plan_delivery_date) || '-') + '</b> • Van: <b>' + h(o.plan_van || '-') + '</b> • Mode: ' + h(o.plan_mode || '-') +
+    (o.plan_option ? ' • Option ' + h(o.plan_option) : '') + (Number(o.plan_realtime) ? ' • <span class="pill">Real-time</span>' : '') + planBadge(o) + '</div>' +
+    '<div class="small muted">Area match: ' + h(o.plan_area || o.area || '-') + (o.plan_at ? ' • set ' + tm(o.plan_at) + ' ' + h(o.plan_by) : '') + '</div>' +
+    (canEdit ? '<details style="margin-top:8px"><summary><b>Override / clear</b></summary><div class="grid2"><div><label>Delivery date</label><input type="date" id="pdd" value="' + h(o.plan_delivery_date || '') + '"></div><div><label>Van</label><select id="pdv"><option value="">-</option>' + vans.map(function (x) { return '<option' + (o.plan_van === x ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select></div><div><label>Mode</label><select id="pdm"><option value="van"' + (o.plan_mode === 'van' ? ' selected' : '') + '>van</option><option value="hand"' + (o.plan_mode === 'hand' ? ' selected' : '') + '>hand</option><option value="courier"' + (o.plan_mode === 'courier' ? ' selected' : '') + '>courier</option></select></div></div><div class="row" style="margin-top:8px"><button class="primary" id="pov">Save override</button><button class="warn" id="pcl">Clear override (auto recompute)</button></div></details>' : '') + '</div>';
+}
+
 // "Done by": users of that role + staff names of that role + Other (free text)
 // All active users + staff names (us role wale pehle), dropdown mein "Naam (Role)".
 function peopleAll(r) {
@@ -373,7 +403,7 @@ function vDisp(v) {
     var open = list.filter(function (o) { return (o.stage === 'billed' || o.stage === 'packed') && !Number(o.hold); });
     var un = open.filter(function (o) { return !o.delivery_mode; }), al = open.filter(function (o) { return o.delivery_mode; });
     var groups = {}; un.forEach(function (o) { var k = (o.area || 'No area') + (o.route ? ' • ' + o.route : ''); (groups[k] = groups[k] || []).push(o); });
-    v.innerHTML = '<h2>Delivery allocation</h2><div class="card"><h3>Bill ho chuke, delivery baaki (' + un.length + ')</h3>' + Object.keys(groups).sort().map(function (k) {
+    v.innerHTML = '<div class="row"><h2>Delivery allocation</h2><a class="btn sm" href="#/kal">🚐 Kal delivery</a></div><div class="card"><h3>Bill ho chuke, delivery baaki (' + un.length + ')</h3>' + Object.keys(groups).sort().map(function (k) {
       return '<div class="small muted" style="margin-top:8px"><b>' + h(k) + '</b> (' + groups[k].length + ')</div>' + groups[k].map(function (o) { return '<label class="chk"><input type="checkbox" class="sel" value="' + o.id + '"><span><b>' + h(o.track_no || '#' + o.id) + '</b> ' + h(o.dealer_name) + ' • ' + h(o.invoice_no) + ' • ' + pcs(o.billed_qty || o.pcs) + ' • ' + h(stageLbl(o.stage)) + (o.boxes ? ' • ' + o.boxes + ' boxes' : '') + '</span></label>'; }).join('');
     }).join('') + (un.length ? delForm() + '<button class="primary big" id="go" style="margin-top:10px">Selected ko allocate karein</button>' : '<p class="muted">Sab allocate ho gaye.</p>') + '</div>' +
       '<div class="card"><h3>Allocated, dispatch baaki (' + al.length + ')</h3>' + al.map(card).join('') + '</div>';
@@ -576,6 +606,97 @@ function vPurchase(v) {
 }
 
 // ---------------- admin
+
+// ---------------- Kal ki delivery + van day log
+function vKalDelivery(v) {
+  if (!can('delivery')) return go('/q');
+  var day = LS.getItem('imw_kal') || '';
+  function load(d) {
+    var payload = d ? { date: d } : { tomorrow: 1 };
+    call('kalDelivery', payload).then(function (r) {
+      day = r.date; LS.setItem('imw_kal', day);
+      var logs = {}; (r.van_logs || []).forEach(function (x) { logs[x.van] = x; });
+      v.innerHTML = '<div class="row"><h2>Kal / plan delivery</h2><input type="date" id="kd" value="' + h(day) + '"><button class="sm" id="kr">Refresh van log</button></div>' +
+        '<p class="small muted">Option ' + h(r.option || (S.m.van_plan && S.m.van_plan.option) || 'A') + ' • ' + (r.orders || []).length + ' open orders for ' + h(dmy(day)) + '</p>' +
+        '<div class="card"><h3>Per van summary</h3>' + table(r.summary || [], [['van', 'Van'], ['stops', 'Stops'], ['orders', 'Orders'], ['pcs', 'Pcs', pcs], ['value', 'Value', inr], ['areas', 'Areas']]) + '</div>' +
+        (r.summary || []).map(function (s) {
+          var lg = logs[s.van] || {};
+          return '<div class="card"><h3>' + h(s.van) + ' — km log</h3><div class="small muted">Planned: ' + s.stops + ' stops • ' + s.orders + ' orders • ' + pcs(s.pcs) + ' • ' + inr(s.value) + '</div>' +
+            '<div class="grid2"><div><label>Start km</label><input id="sk_' + h(s.van) + '" inputmode="numeric" value="' + h(lg.start_km != null ? lg.start_km : '') + '"></div><div><label>End km</label><input id="ek_' + h(s.van) + '" inputmode="numeric" value="' + h(lg.end_km != null ? lg.end_km : '') + '"></div></div>' +
+            '<div class="small muted">Running: ' + (lg.running_km !== '' && lg.running_km != null ? h(lg.running_km) + ' km' : '—') + (lg.note ? ' • ' + h(lg.note) : '') + '</div>' +
+            '<button class="primary" data-van="' + h(s.van) + '" style="margin-top:8px">Save km</button></div>';
+        }).join('') +
+        '<div class="card"><h3>Orders</h3>' + (r.orders || []).map(card).join('') + (!(r.orders || []).length ? '<p class="muted">Is din koi open plan order nahi.</p>' : '') + '</div>';
+      $('kd').onchange = function () { load(val('kd')); };
+      $('kr').onclick = function () { call('refreshVanLog', { date: day }).then(function () { toast('Van log refreshed'); load(day); }).catch(fail); };
+      Array.prototype.forEach.call(document.querySelectorAll('[data-van]'), function (b) {
+        b.onclick = function () {
+          var van = b.getAttribute('data-van');
+          call('saveVanLog', { date: day, van: van, start_km: val('sk_' + van), end_km: val('ek_' + van) }).then(function () { toast('Km saved'); load(day); }).catch(fail);
+        };
+      });
+    }).catch(fail);
+  }
+  load(day || null);
+}
+
+// ---------------- Van plan (Warehouse Manager settings)
+function vVanPlan(v) {
+  if (!can('routes')) return go('/q');
+  function draw() {
+    Promise.all([call('routesList'), call('unmappedDealers')]).then(function (rr) {
+      var R = rr[0], U = rr[1], opt = R.option || 'A';
+      var routes = (R.routes || []).filter(function (x) { return Number(x.active) !== 0; }).sort(function (a, b) { return String(a.option).localeCompare(String(b.option)) || String(a.area).localeCompare(String(b.area)); });
+      v.innerHTML = '<h2>Van plan</h2>' +
+        '<div class="card"><h3>Active plan option</h3><p class="small muted">A = Minimum km (tighter days). B = Maximum volume (extra weekdays). Switch se open (not dispatched) orders recompute hote hain.</p>' +
+        '<div class="row"><label class="chk"><input type="radio" name="vpo" value="A"' + (opt === 'A' ? ' checked' : '') + '> A — Minimum km</label><label class="chk"><input type="radio" name="vpo" value="B"' + (opt === 'B' ? ' checked' : '') + '> B — Maximum volume</label></div>' +
+        '<div class="grid2"><div><label>Real-time cutoff (IST)</label><input id="vcut" value="' + h(R.realtime_cutoff || '20:00') + '" placeholder="20:00"></div></div>' +
+        '<button class="primary" id="vpos" style="margin-top:8px">Save option + recompute</button> <button class="sm" id="vre">Recompute only</button></div>' +
+                '<div class="card" style="border:2px solid #c0392b;background:#fff5f5"><div class="row"><h3 style="color:#c0392b">⚠ Unmapped dealers / zones — ' + (U.count || 0) + '</h3><span class="pill st-hold">option ' + h(U.option) + '</span></div>' +
+        '<p class="small">WH orders mein aksar zone = <b>Unmapped</b> hota hai. Neeche list fix karein: Dealers → Area / zone badlein, ya Van plan mein route jodein. Open orders: <b>' + (U.open_orders_unmapped || 0) + '</b> unmapped/no-area, <b>' + (U.open_orders_no_plan || 0) + '</b> bina plan date.</p>' +
+        (!(U.dealers || []).length ? '<p class="muted">Sab dealers map ho gaye 👍</p>' :
+          (U.dealers || []).slice(0, 120).map(function (d) {
+            return '<div class="chk"><a href="#/dl">' + h(d.name) + '</a> <span class="small"><b>' + h(d.area || '(no area)') + '</b>' + (d.zone ? ' • zone ' + h(d.zone) : '') + (d.why ? ' <span class="short">[' + h(d.why) + ']</span>' : '') + (d.kmpl ? ' • KMPL→' + h(d.kmpl) : '') + '</span></div>';
+          }).join('') + (U.count > 120 ? '<p class="small muted">…aur ' + (U.count - 120) + ' — Dealers tab se search karein</p>' : '')) +
+        '<div class="row" style="margin-top:8px"><a class="btn sm danger" href="#/all" id="goUnmapped">Filter: Unmapped area orders</a><a class="btn sm" href="#/dl">Dealers</a></div></div>'; +
+        '<div class="card"><div class="row"><h3>Routes (' + routes.length + ')</h3><button class="sm" id="vseed">Seed area_day_master (110)</button></div>' +
+        '<p class="small muted">Master: area_day_master.csv — 52 van + 3 courier (Gurgaon/Faridabad/Elan Epic) × options A/B. Closed days CSV closed_day se; Sheet Closed_Days tab bhi sync ho sakta hai baad mein.</p>' +
+        table(routes, [['option', 'Opt'], ['area', 'Area'], ['van', 'Van'], ['weekdays', 'Days'], ['mode', 'Mode'], ['notes', 'Notes'], ['id', '', function (x) { return '<button class="sm" data-re="' + x + '">Edit</button>'; }]]) +
+        '<details style="margin-top:8px"><summary><b>+ Route / area</b></summary><div class="grid2"><div><label>Area</label><input id="ra"></div><div><label>Van</label><select id="rv"><option value="">-</option>' + (R.vans || []).map(function (x) { return '<option>' + h(x) + '</option>'; }).join('') + '</select></div><div><label>Weekdays</label><input id="rw" placeholder="Mon,Wed"></div><div><label>Mode</label><select id="rm"><option>van</option><option>hand</option><option>courier</option></select></div><div><label>Option</label><select id="ro"><option>A</option><option>B</option></select></div><div><label>Notes</label><input id="rn"></div></div><button class="primary" id="rsa" style="margin-top:8px">Save route</button></details></div>' +
+        '<div class="card"><h3>Market closed weekdays</h3>' + table(R.closed || [], [['area', 'Area'], ['closed_weekday', 'Closed'], ['id', '', function (x) { return '<button class="sm warn" data-mc="' + x + '">Hatao</button>'; }]]) +
+        '<div class="row" style="margin-top:6px"><input id="mca" placeholder="Area"><input id="mcw" placeholder="Sun"><button id="mcs">Add</button></div></div>' +
+        '<div class="card"><h3>Holidays</h3>' + table(R.holidays || [], [['date', 'Date', dmy], ['area', 'Area'], ['reason', 'Reason'], ['id', '', function (x) { return '<button class="sm warn" data-ho="' + x + '">Hatao</button>'; }]]) +
+        '<div class="row" style="margin-top:6px"><input type="date" id="hd"><input id="ha" placeholder="ALL / area"><input id="hr" placeholder="Reason"><button id="hs">Add</button></div></div>' +
+'<div class="card"><a class="btn sm" href="#/kal">🚐 Kal delivery + km log</a></div>';
+      $('vpos').onclick = function () {
+        var o = (document.querySelector('input[name=vpo]:checked') || {}).value || 'A';
+        if (!confirm('Option ' + o + ' set karke sab open orders recompute karein?')) return;
+        call('setVanPlanOption', { option: o, cutoff: val('vcut') }).then(function (r) { S.m = null; toast('Option ' + r.option + ' • updated ' + r.updated); draw(); }).catch(fail);
+      };
+      $('vre').onclick = function () { call('recomputePlans').then(function (r) { toast('Recomputed ' + r.updated); }).catch(fail); };
+      if ($('goUnmapped')) $('goUnmapped').onclick = function (e) { e.preventDefault(); LS.setItem('imw_f', 'unmapped'); go('/all'); };
+      $('vseed').onclick = function () { if (!confirm('area_day_master.csv seed load (110 rows, A+B)? Active plan B set hoga. Existing same area+option update.')) return; call('seedRoutesExample', { replace: 0 }).then(function (r) { toast('Seeded ' + r.seeded + ' routes • recompute ' + r.recomputed); draw(); }).catch(fail); };
+      $('rsa').onclick = function () { call('saveRoute', { area: val('ra'), van: val('rv'), weekdays: val('rw'), mode: val('rm'), option: val('ro'), notes: val('rn') }).then(function () { toast('Route saved'); draw(); }).catch(fail); };
+      $('mcs').onclick = function () { call('saveMarketClosed', { area: val('mca'), closed_weekday: val('mcw') }).then(function () { toast('Closed day saved'); draw(); }).catch(fail); };
+      $('hs').onclick = function () { call('saveHoliday', { date: val('hd'), area: val('ha') || 'ALL', reason: val('hr') }).then(function () { toast('Holiday saved'); draw(); }).catch(fail); };
+      Array.prototype.forEach.call(document.querySelectorAll('[data-re]'), function (b) {
+        b.onclick = function () {
+          var r = routes.filter(function (x) { return Number(x.id) === Number(b.getAttribute('data-re')); })[0]; if (!r) return;
+          var d = sheet('<h3>Edit route</h3><label>Area</label><input id="era" value="' + h(r.area) + '"><label>Van</label><input id="erv" value="' + h(r.van) + '"><label>Weekdays</label><input id="erw" value="' + h(r.weekdays) + '"><label>Mode</label><select id="erm"><option' + (r.mode === 'van' ? ' selected' : '') + '>van</option><option' + (r.mode === 'hand' ? ' selected' : '') + '>hand</option><option' + (r.mode === 'courier' ? ' selected' : '') + '>courier</option></select><label>Option</label><select id="ero"><option' + (r.option === 'A' ? ' selected' : '') + '>A</option><option' + (r.option === 'B' ? ' selected' : '') + '>B</option></select><label>Notes</label><input id="ern" value="' + h(r.notes) + '"><label class="chk"><input type="checkbox" id="era2"' + (Number(r.active) !== 0 ? ' checked' : '') + '> Active</label><button class="primary big" id="ers" style="margin-top:10px">Save</button>');
+          $('ers').onclick = function () { call('saveRoute', { id: r.id, area: val('era'), van: val('erv'), weekdays: val('erw'), mode: val('erm'), option: val('ero'), notes: val('ern'), active: $('era2').checked ? 1 : 0 }).then(function () { d.remove(); toast('Saved'); draw(); }).catch(fail); };
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-mc]'), function (b) {
+        b.onclick = function () { if (!confirm('Hataein?')) return; call('saveMarketClosed', { id: Number(b.getAttribute('data-mc')), remove: 1, area: ' ', closed_weekday: 'Sun' }).then(draw).catch(fail); };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-ho]'), function (b) {
+        b.onclick = function () { if (!confirm('Hataein?')) return; call('saveHoliday', { id: Number(b.getAttribute('data-ho')), remove: 1 }).then(draw).catch(fail); };
+      });
+    }).catch(function (e) { if (/Unknown action/i.test(String(e && e.message || e))) { v.innerHTML = '<div class="card center muted">Van plan server pe abhi deploy nahi. Stage build ready — Pramod approve ke baad push.</div>'; return; } fail(e); });
+  }
+  draw();
+}
+
 function vAdmin(v) {
   Promise.all([call('users'), call('staffList')]).then(function (rr) { var us = rr[0]; S.m.staffAll = rr[1];
     v.innerHTML = '<h2>Admin</h2><div class="card"><h3>Users</h3>' + table(us, [['username', 'Login'], ['name', 'Naam'], ['role_label', 'Role'], ['active', 'Active', function (x) { return Number(x) ? 'Haan' : 'Nahi'; }], ['id', '', function (x) { return '<button class="sm" data-u="' + x + '">Edit</button>'; }]]) +
