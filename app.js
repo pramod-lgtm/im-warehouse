@@ -658,7 +658,11 @@ function vVanPlan(v) {
           (U.dealers || []).slice(0, 120).map(function (d) {
             return '<div class="chk"><a href="#/dl">' + h(d.name) + '</a> <span class="small"><b>' + h(d.area || '(no area)') + '</b>' + (d.zone ? ' • zone ' + h(d.zone) : '') + (d.why ? ' <span class="short">[' + h(d.why) + ']</span>' : '') + (d.kmpl ? ' • KMPL→' + h(d.kmpl) : '') + '</span></div>';
           }).join('') + (U.count > 120 ? '<p class="small muted">…aur ' + (U.count - 120) + ' — Dealers tab se search karein</p>' : '')) +
-        '<div class="row" style="margin-top:8px"><a class="btn sm danger" href="#/all" id="goUnmapped">Filter: Unmapped area orders</a><a class="btn sm" href="#/dl">Dealers</a></div></div>' +
+        '<div class="row" style="margin-top:8px;flex-wrap:wrap;gap:6px"><a class="btn sm danger" href="#/all" id="goUnmapped">Filter: Unmapped area orders</a><a class="btn sm" href="#/dl">Dealers</a>' +
+        '<button class="sm primary" id="dlUnmappedTpl">Download template (CSV)</button>' +
+        '<button class="sm" id="dlAreasList">Download areas list</button>' +
+        '<label class="btn sm" style="margin:0">Import filled CSV<input type="file" id="impUnmapped" accept=".csv,.xlsx,.xls" class="hidden"></label></div>' +
+        '<div id="impUnmappedBox" style="margin-top:8px"></div></div>' +
         '<div class="card"><div class="row"><h3>Routes (' + routes.length + ')</h3><button class="sm" id="vseed">Seed area_day_master (110)</button></div>' +
         '<p class="small muted">Master: area_day_master.csv — 52 van + 3 courier (Gurgaon/Faridabad/Elan Epic) × options A/B. Closed days CSV closed_day se; Sheet Closed_Days tab bhi sync ho sakta hai baad mein.</p>' +
         table(routes, [['option', 'Opt'], ['area', 'Area'], ['van', 'Van'], ['weekdays', 'Days'], ['mode', 'Mode'], ['notes', 'Notes'], ['id', '', function (x) { return '<button class="sm" data-re="' + x + '">Edit</button>'; }]]) +
@@ -675,6 +679,56 @@ function vVanPlan(v) {
       };
       $('vre').onclick = function () { call('recomputePlans').then(function (r) { toast('Recomputed ' + r.updated); }).catch(fail); };
       if ($('goUnmapped')) $('goUnmapped').onclick = function (e) { e.preventDefault(); LS.setItem('imw_f', 'unmapped'); go('/all'); };
+      function unmappedCsvEscape(v) { v = String(v == null ? '' : v); if (/[",\n\r]/.test(v)) return '"' + v.replace(/"/g, '""') + '"'; return v; }
+      function downloadUnmappedCsv(rows, cols, name) {
+        var lines = [cols.join(',')];
+        (rows || []).forEach(function (r) { lines.push(cols.map(function (c) { return unmappedCsvEscape(r[c]); }).join(',')); });
+        var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv' })); a.download = name + '-' + today() + '.csv'; a.click();
+      }
+      if ($('dlUnmappedTpl')) $('dlUnmappedTpl').onclick = function () {
+        call('unmappedTemplate').then(function (T) {
+          var cols = T.columns || ['dealer_id','dealer_name','city','current_area','current_zone','current_route','open_orders','why','suggested_area','suggested_van','suggested_weekdays','suggested_mode','new_area','new_zone','new_route','mode','notes'];
+          downloadUnmappedCsv(T.rows || [], cols, 'unmapped-dealers-template');
+          toast((T.count || 0) + ' rows • ' + (T.suggested_confident || 0) + ' suggested');
+        }).catch(fail);
+      };
+      if ($('dlAreasList')) $('dlAreasList').onclick = function () {
+        call('areasList').then(function (A) {
+          downloadUnmappedCsv(A.areas || [], ['area','van','weekdays','mode','option'], 'valid-areas');
+          toast((A.count || 0) + ' areas' + (A.from_seed ? ' (from seed — Routes empty)' : ''));
+        }).catch(fail);
+      };
+      if ($('impUnmapped')) $('impUnmapped').onchange = function () {
+        var file = this.files[0]; this.value = ''; if (!file) return;
+        readFile(file).then(function (rows) {
+          if (!rows.length) throw new Error('File khali hai');
+          rows = rows.map(function (r) { var o = {}; Object.keys(r).forEach(function (k) { o[String(k).trim().toLowerCase()] = r[k]; }); return o; });
+          var box = $('impUnmappedBox');
+          box.innerHTML = '<p class="small">Preview…</p>';
+          return call('importDealerAreas', { rows: rows, dry_run: 1, apply: 0 }).then(function (prev) {
+            var errs = (prev.warnings || []).slice(0, 40).map(function (w) {
+              return '<div class="small short">L' + h(w.line) + ' #' + h(w.dealer_id) + ': ' + h(w.msg) + '</div>';
+            }).join('');
+            var pv = (prev.preview || []).slice(0, 30).map(function (r) {
+              return '<tr><td>' + h(r.dealer_id) + '</td><td>' + h(r.dealer_name) + '</td><td>' + h(r.new_area) + '</td><td>' + h(r.new_zone) + '</td><td>' + h(r.new_route) + '</td><td>' + h(r.mode) + '</td></tr>';
+            }).join('');
+            box.innerHTML = '<div class="card" style="background:#fff"><b>Preview:</b> ' + (prev.updated || 0) + ' update, ' + (prev.skipped || 0) + ' skip, ' + (prev.warnings_count || 0) + ' warnings' +
+              (prev.routes_to_create && prev.routes_to_create.length ? ' • ' + prev.routes_to_create.length + ' areas create honge (tick below)' : '') +
+              '<div class="tw" style="max-height:220px;overflow:auto;margin-top:6px"><table><tr><th>id</th><th>name</th><th>new_area</th><th>new_zone</th><th>new_route</th><th>mode</th></tr>' + pv + '</table></div>' +
+              (errs ? '<details style="margin-top:6px"><summary>Warnings</summary>' + errs + '</details>' : '') +
+              '<label class="chk" style="margin-top:8px"><input type="checkbox" id="impCreateAreas"> Create missing areas (Routes) — CSV mein van/weekdays / mode chahiye</label>' +
+              '<div class="row" style="margin-top:8px"><button class="primary" id="impApply">Apply import</button><button class="sm" id="impCancel">Cancel</button></div></div>';
+            $('impCancel').onclick = function () { box.innerHTML = ''; };
+            $('impApply').onclick = function () {
+              if (!confirm('Apply ' + (prev.updated || 0) + ' dealer updates?')) return;
+              call('importDealerAreas', { rows: rows, apply: 1, dry_run: 0, create_missing_areas: $('impCreateAreas').checked ? 1 : 0 }).then(function (r) {
+                toast('Updated ' + r.updated + ' • orders ' + (r.orders_recomputed || 0) + (r.routes_created ? ' • routes +' + r.routes_created : '') + (r.warnings_count ? ' • warn ' + r.warnings_count : ''));
+                box.innerHTML = ''; draw();
+              }).catch(fail);
+            };
+          });
+        }).catch(fail);
+      };
       $('vseed').onclick = function () { if (!confirm('area_day_master.csv seed load (110 rows, A+B)? Active plan B set hoga. Existing same area+option update.')) return; call('seedRoutesExample', { replace: 0 }).then(function (r) { toast('Seeded ' + r.seeded + ' routes • recompute ' + r.recomputed); draw(); }).catch(fail); };
       $('rsa').onclick = function () { call('saveRoute', { area: val('ra'), van: val('rv'), weekdays: val('rw'), mode: val('rm'), option: val('ro'), notes: val('rn') }).then(function () { toast('Route saved'); draw(); }).catch(fail); };
       $('mcs').onclick = function () { call('saveMarketClosed', { area: val('mca'), closed_weekday: val('mcw') }).then(function () { toast('Closed day saved'); draw(); }).catch(fail); };
