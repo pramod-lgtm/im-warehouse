@@ -658,7 +658,7 @@ function vVanPlan(v) {
           (U.dealers || []).slice(0, 120).map(function (d) {
             return '<div class="chk"><a href="#/dl">' + h(d.name) + '</a> <span class="small"><b>' + h(d.area || '(no area)') + '</b>' + (d.zone ? ' • zone ' + h(d.zone) : '') + (d.why ? ' <span class="short">[' + h(d.why) + ']</span>' : '') + (d.kmpl ? ' • KMPL→' + h(d.kmpl) : '') + '</span></div>';
           }).join('') + (U.count > 120 ? '<p class="small muted">…aur ' + (U.count - 120) + ' — Dealers tab se search karein</p>' : '')) +
-        '<div class="row" style="margin-top:8px"><a class="btn sm danger" href="#/all" id="goUnmapped">Filter: Unmapped area orders</a><a class="btn sm" href="#/dl">Dealers</a></div></div>'; +
+        '<div class="row" style="margin-top:8px"><a class="btn sm danger" href="#/all" id="goUnmapped">Filter: Unmapped area orders</a><a class="btn sm" href="#/dl">Dealers</a></div></div>' +
         '<div class="card"><div class="row"><h3>Routes (' + routes.length + ')</h3><button class="sm" id="vseed">Seed area_day_master (110)</button></div>' +
         '<p class="small muted">Master: area_day_master.csv — 52 van + 3 courier (Gurgaon/Faridabad/Elan Epic) × options A/B. Closed days CSV closed_day se; Sheet Closed_Days tab bhi sync ho sakta hai baad mein.</p>' +
         table(routes, [['option', 'Opt'], ['area', 'Area'], ['van', 'Van'], ['weekdays', 'Days'], ['mode', 'Mode'], ['notes', 'Notes'], ['id', '', function (x) { return '<button class="sm" data-re="' + x + '">Edit</button>'; }]]) +
