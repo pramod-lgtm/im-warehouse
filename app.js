@@ -208,24 +208,60 @@ function qRange(k, d1, d2) {
 function vQueue(v) {
   call('orders', {}).then(function (list) {
     var k = LS.getItem('imw_qf') || '', d1 = LS.getItem('imw_qd1') || '', d2 = LS.getItem('imw_qd2') || '';
+    var qs = LS.getItem('imw_qs') || '', dq = '';
     var opts = [['', 'Sab dates'], ['today', 'Aaj'], ['yday', 'Kal'], ['week', 'Is hafte'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
+    var stageOpts = [['', 'Sab'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['hold', 'HOLD'], ['pending_bill', 'Pending for billing']];
     v.innerHTML = '<div class="row"><h2>Meri queue (<span id="qn">' + list.length + '</span>)</h2>' + syncBtn() + '</div><p class="small muted">Last sync: ' + tm(S.m.last_sync) + '</p>' +
       '<div class="row"><select id="qf">' + opts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === k ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
-      '<input type="date" id="qd1" value="' + h(d1) + '" title="Date / From"><input type="date" id="qd2" value="' + h(d2) + '" title="To"></div><p class="small" id="qsum"></p><div id="qlst"></div>';
+      '<input type="date" id="qd1" value="' + h(d1) + '" title="Date / From"><input type="date" id="qd2" value="' + h(d2) + '" title="To"></div>' +
+      '<div class="row" style="margin-top:8px;flex-wrap:wrap;gap:6px"><input id="qdl" placeholder="Dealer / customer search" style="flex:1;min-width:180px" list="qdl_list" autocomplete="off"><datalist id="qdl_list"></datalist></div>' +
+      '<div class="row" style="margin-top:6px;flex-wrap:wrap;gap:6px" id="qstages"></div>' +
+      '<p class="small" id="qsum"></p><div id="qlst"></div>';
+    function qStageOk(o, st) {
+      if (!st) return true;
+      if (st === 'hold') return !!Number(o.hold);
+      if (st === 'pending_bill') return o.stage !== 'cancelled' && o.stage !== 'dispatched' && ['new', 'punched', 'allocated', 'picked', 'checked'].indexOf(o.stage) >= 0;
+      if (st === 'picking') return o.stage === 'allocated';
+      if (st === 'checking') return o.stage === 'picked';
+      if (st === 'billing') return o.stage === 'checked';
+      return o.stage === st;
+    }
+    function qDealerOk(o, q) {
+      if (!q) return true;
+      q = q.toUpperCase();
+      return String(o.dealer_name || '').toUpperCase().indexOf(q) >= 0;
+    }
     function draw() {
       $('qd1').style.display = k === 'date' || k === 'range' ? '' : 'none'; $('qd2').style.display = k === 'range' ? '' : 'none';
-      var r = qRange(k, d1, d2), f = r ? list.filter(function (o) { var d = String(o.order_date || ''); return d >= r[0] && d <= r[1]; }) : list;
+      var r = qRange(k, d1, d2), base = r ? list.filter(function (o) { var d = String(o.order_date || ''); return d >= r[0] && d <= r[1]; }) : list;
+      var names = {};
+      base.forEach(function (o) { if (o.dealer_name) names[o.dealer_name] = 1; });
+      $('qdl_list').innerHTML = Object.keys(names).sort().map(function (n) { return '<option value="' + h(n) + '">'; }).join('');
+      var mid = base.filter(function (o) { return qDealerOk(o, dq); });
+      $('qstages').innerHTML = stageOpts.map(function (s) {
+        var n = mid.filter(function (o) { return qStageOk(o, s[0]); }).length;
+        return '<button type="button" class="sm' + (qs === s[0] ? ' primary' : '') + '" data-qs="' + s[0] + '">' + s[1] + ' (' + n + ')</button>';
+      }).join('');
+      Array.prototype.forEach.call(document.querySelectorAll('#qstages [data-qs]'), function (b) {
+        b.onclick = function () { qs = b.getAttribute('data-qs'); LS.setItem('imw_qs', qs); draw(); };
+      });
+      var f = mid.filter(function (o) { return qStageOk(o, qs); });
       var tp = f.reduce(function (a, o) { return a + (Number(o.pcs) || 0); }, 0);
-      $('qn').textContent = f.length + (r ? ' / ' + list.length : '');
-      $('qsum').innerHTML = r ? 'Order date ' + h(dmy(r[0] === '0000-00-00' ? '' : r[0]) || '...') + ' se ' + h(dmy(r[1] === '9999-12-31' ? '' : r[1]) || '...') + ': <b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>' : 'Sab: <b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>';
-      $('qlst').innerHTML = f.length ? f.map(card).join('') : '<div class="card center muted">' + (r ? 'Is period mein koi kaam nahi.' : 'Abhi koi kaam nahi.') + '</div>';
+      $('qn').textContent = f.length + (r || dq || qs ? ' / ' + list.length : '');
+      var bits = [];
+      if (r) bits.push('Order date ' + h(dmy(r[0] === '0000-00-00' ? '' : r[0]) || '...') + ' se ' + h(dmy(r[1] === '9999-12-31' ? '' : r[1]) || '...'));
+      if (dq) bits.push('dealer "' + h(dq) + '"');
+      $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : 'Sab: ') + '<b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>';
+      $('qlst').innerHTML = f.length ? f.map(card).join('') : '<div class="card center muted">' + ((r || dq || qs) ? 'Is filter mein koi order nahi.' : 'Abhi koi kaam nahi.') + '</div>';
     }
     $('qf').onchange = function () { k = this.value; LS.setItem('imw_qf', k); if ((k === 'date' || k === 'range') && !d1) { d1 = today(); $('qd1').value = d1; LS.setItem('imw_qd1', d1); } draw(); };
     $('qd1').onchange = function () { d1 = this.value; LS.setItem('imw_qd1', d1); draw(); };
     $('qd2').onchange = function () { d2 = this.value; LS.setItem('imw_qd2', d2); draw(); };
+    $('qdl').oninput = function () { dq = this.value.trim(); draw(); };
     draw(); bindSync(function () { vQueue(v); });
   }).catch(fail);
 }
+
 function vAll(v) {
   call('orders', { all: 1 }).then(function (list) {
     var st = LS.getItem('imw_f') || '', sf = LS.getItem('imw_sf') || '', pv = LS.getItem('imw_pv') || '', pd = LS.getItem('imw_pd') || '';
