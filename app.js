@@ -81,7 +81,7 @@ function sheet(html) { var d = document.createElement('div'); d.className = 'she
 
 // ---------------- router
 function go(p) { if (location.hash !== '#' + p) location.hash = '#' + p; else route(); }
-var NAV = [['/q', '📋', 'Meri queue', null], ['/all', '🏬', 'Sab orders', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
+var NAV = [['/q', '📋', 'Meri queue', null], ['/sq', '🛍️', 'Store orders', null], ['/all', '🏬', 'Sab orders', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
 function nav(cur) {
   var n = $('nav'); if (!S.user) { n.classList.add('hidden'); return; }
   n.innerHTML = NAV.filter(function (x) { return !x[3] || can(x[3]); }).map(function (x) { return '<a href="#' + x[0] + '" class="' + (cur.indexOf(x[0]) === 0 ? 'on' : '') + '"><i>' + x[1] + '</i>' + x[2] + '</a>'; }).join('');
@@ -96,7 +96,10 @@ function route() {
   masters().then(function () {
     if (p.indexOf('/o/') === 0) return vOrder(v, Number(p.slice(3)));
     if (p === '/new') return vNew(v, null);
-    if (p.indexOf('/edit/') === 0) return call('order', { id: Number(p.slice(6)) }).then(function (r) { vNew(v, r.order); }).catch(fail);
+    if (p === '/sq/new') return vStoreNew(v, null);
+    if (p.indexOf('/sq/edit/') === 0) return call('order', { id: Number(p.slice(9)) }).then(function (r) { vStoreNew(v, r.order); }).catch(fail);
+    if (p === '/sq') return vStoreQueue(v);
+    if (p.indexOf('/edit/') === 0) return call('order', { id: Number(p.slice(6)) }).then(function (r) { if (isStore(r.order)) return go('/sq/edit/' + r.order.id); vNew(v, r.order); }).catch(fail);
     var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/kal': vKalDelivery, '/van': vVanPlan, '/dash': vDash, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList, '/dup': vDups }[p] || vQueue; f(v);
   }).catch(fail);
 }
@@ -358,7 +361,7 @@ function vOrder(v, id) {
     v.innerHTML = '<div class="card"><div class="row"><h2>' + trk(o) + h(ono(o)) + ' ' + h(o.dealer_name) + '</h2><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div><div class="small muted">Zone ' + h(o.zone || '-') + ' • ' + h(o.area || 'area ?') + ' • ' + h(o.route || '-') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.lat !== '' ? ' • <a target="_blank" href="https://www.google.com/maps?q=' + o.lat + ',' + o.lng + '">map</a>' : '') + '</div>' + '<div class="small" style="margin-top:4px">' + slaBadge(o, true) + (can('recvtime') && o.sla && !o.sla.billed && o.stage !== 'cancelled' ? '<button class="sm" id="rte" style="margin-top:6px">⏱ Order aaya time badlein</button>' : '') + '</div>' + (o.remarks ? '<div class="small">Remark: ' + h(o.remarks) + '</div>' : '') +
       '<div class="small muted">Source: ' + h(srcOf(o)) + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.salesman ? ' • salesman: ' + h(o.salesman) : '') + (o.expected_date ? ' • expected dispatch ' + h(dmy(o.expected_date)) : '') + (o.edited_at ? ' • edited ' + tm(o.edited_at) + ' ' + h(o.edited_by) : '') + '</div>' +
       (o.stage === 'cancelled' ? '<div class="short">Cancel: ' + h(o.cancel_reason) + ' (' + tm(o.cancelled_at) + ', ' + h(o.cancelled_by) + ')</div>' : '') +
-      (manEdit ? '<div class="row" style="margin-top:8px"><a class="btn sm" href="#/edit/' + o.id + '">✏️ Edit</a><button class="sm danger" id="cnl">Cancel order</button></div>' : '') + '</div>' +
+      (manEdit ? '<div class="row" style="margin-top:8px"><a class="btn sm" href="#/' + (isStore(o) ? 'sq/' : '') + 'edit/' + o.id + '">✏️ Edit</a><button class="sm danger" id="cnl">Cancel order</button></div>' : '') + '</div>' +
       (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + dupCard(o, r.dup_orders) + (o.merged_into ? '<div class="card short">Ye order duplicate tha, <a href="#/o/' + h(o.merged_into) + '">' + h((o.merged_into_order && (o.merged_into_order.track_no || o.merged_into_order.order_no)) || '#' + o.merged_into) + '</a> mein merge hua (' + tm(o.merged_at) + ', ' + h(o.merged_by) + ')</div>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + tl + act + '</div>' + waitCard(o) + planCard(o) + hold + del + nb;
     var b = $('stepb'); if (b) b.onclick = function () {
       var d = { id: o.id, action: nx };
@@ -383,6 +386,7 @@ function vOrder(v, id) {
     };
     if ($('wsv')) $('wsv').onclick = function () { var b = Array.prototype.filter.call(document.querySelectorAll('.wb'), function (i) { return i.checked; }).map(function (i) { return i.value; }); call('waitPurchase', { id: o.id, brands: b }).then(function () { toast(b.length ? 'Waiting for purchase - ' + b.join(', ') : 'Stock wait hata diya'); vOrder(v, id); }).catch(fail); };
     bindDup(v, o, r.dup_orders);
+    if (isStore(o)) storePhotosCard(v, o);
     if ($('unh')) $('unh').onclick = function () { call('unhold', { id: o.id }).then(function () { toast('Unhold'); vOrder(v, id); }).catch(fail); };
     if ($('delb')) $('delb').onclick = function () { call('delivery', delData([o.id])).then(function () { toast('Delivery saved'); vOrder(v, id); }).catch(fail); };
     if ($('pov')) $('pov').onclick = function () { call('overridePlan', { id: o.id, plan_delivery_date: val('pdd'), plan_van: val('pdv'), plan_mode: val('pdm') }).then(function () { toast('Plan override saved'); vOrder(v, id); }).catch(fail); };
@@ -529,13 +533,151 @@ function loadUm() {
 
 // ---------------- new / edit manual order
 var BRANDS = ['TRYLO', 'C9', 'OS'];
+
+// ---------------- Karwa Marketing Store orders (warehouse types the store's paper order + 3 photos)
+var STORE_SRC = 'Karwa Marketing Store';
+var STORE_FALLBACK = ['Kamla Nagar', 'Rohini City Centre', 'V3S', 'Burari', 'Mahagun Mall Ghaziabad', 'Elan Epic Gurgaon', 'Pacific Mall Anand Vihar', 'Mukherjee Nagar', 'H&S Mall Boulevard Walk Greater Noida West'];
+var PHOTO_KINDS = [['order', 'Order photo'], ['pending', 'Pending page'], ['exec', 'Execution page']];
+function isStore(o) { return o && o.source === STORE_SRC; }
+function storeList() { return (S.m && S.m.stores) || STORE_FALLBACK; }
+function storeOf(o) { return o.store_name || o.dealer_name; }
+function photoFlags(o) {
+  var ph = o.photos || { order: o.photo_order_id ? 1 : 0, pending: o.photo_pending_id ? 1 : 0, exec: o.photo_exec_id ? 1 : 0 };
+  return PHOTO_KINDS.map(function (k) { return ph[k[0]] ? '<span class="pill" style="background:#e6f4ea;color:#1e7e34">✔ ' + k[1] + '</span>' : '<span class="pill" style="background:#fdecea;color:#c0392b">✖ ' + k[1] + ' nahi</span>'; }).join(' ');
+}
+/** Resize to max edge 1600px, JPEG q 0.7. Resolves {mime, b64, url}. */
+function compressImg(file) {
+  return new Promise(function (ok, bad) {
+    if (!file || !/^image\//.test(file.type)) return bad(new Error('Sirf photo chunein.'));
+    var rd = new FileReader(); rd.onerror = function () { bad(new Error('Photo padh nahi paye.')); };
+    rd.onload = function () {
+      var im = new Image(); im.onerror = function () { bad(new Error('Photo khul nahi rahi, doosri chunein.')); };
+      im.onload = function () {
+        var sc = Math.min(1, 1600 / Math.max(im.width, im.height)), c = document.createElement('canvas'); c.width = Math.round(im.width * sc); c.height = Math.round(im.height * sc);
+        var x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0, c.width, c.height);
+        var url = c.toDataURL('image/jpeg', 0.7); ok({ mime: 'image/jpeg', b64: url.split(',')[1], url: url });
+      };
+      im.src = rd.result;
+    };
+    rd.readAsDataURL(file);
+  });
+}
+function uploadPhoto(id, kind, ph) { return call('uploadStorePhoto', { order_id: id, kind: kind, mime: ph.mime, b64: ph.b64 }); }
+function photoInputs(have) {
+  return PHOTO_KINDS.map(function (k) { return '<div class="card" style="margin:6px 0"><label><b>' + k[1] + '</b>' + (have && have[k[0]] ? ' <span class="small" style="color:#1e7e34">(lagi hui hai, nayi chunein to badal jayegi)</span>' : ' *') + '</label>' +
+    '<input type="file" accept="image/*" capture="environment" data-ph="' + k[0] + '"><div class="small muted" id="phs_' + k[0] + '"></div><img id="phv_' + k[0] + '" style="max-width:160px;max-height:160px;display:none;margin-top:6px;border:1px solid var(--line)"></div>'; }).join('');
+}
+function bindPhotoInputs(store) {
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ph]'), function (inp) {
+    inp.onchange = function () {
+      var k = inp.dataset.ph, f = inp.files[0]; delete store[k]; $('phv_' + k).style.display = 'none'; if (!f) return;
+      $('phs_' + k).textContent = 'Photo chhoti kar rahe hain...';
+      compressImg(f).then(function (ph) { store[k] = ph; $('phv_' + k).src = ph.url; $('phv_' + k).style.display = ''; $('phs_' + k).textContent = 'Ready (' + Math.round(ph.b64.length * 0.75 / 1024) + ' KB)'; })
+        .catch(function (e) { inp.value = ''; $('phs_' + k).textContent = ''; fail(e); });
+    };
+  });
+}
+/** Upload photos one by one. Returns kinds that failed (order stays saved). */
+function uploadAll(id, store) {
+  var bad = [];
+  return Object.keys(store).reduce(function (p, k) { return p.then(function () { return uploadPhoto(id, k, store[k]).catch(function () { bad.push(k); }); }); }, Promise.resolve()).then(function () { return bad; });
+}
+function kindLbl(k) { return PHOTO_KINDS.filter(function (x) { return x[0] === k; })[0][1]; }
+function vStoreQueue(v) {
+  call('storeOrders', {}).then(function (list) {
+    var k = LS.getItem('imw_sqf') || '', d1 = LS.getItem('imw_sqd1') || '', d2 = LS.getItem('imw_sqd2') || '', qs = LS.getItem('imw_sqs') || '', sq = '';
+    var opts = [['', 'Sab dates'], ['today', 'Aaj'], ['yday', 'Kal'], ['week', 'Is hafte'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
+    var stageOpts = [['', 'Sab'], ['new', 'Naye'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['ready', 'Bill ho gaya'], ['hold', 'HOLD'], ['nophoto', 'Photo baaki']];
+    v.innerHTML = '<div class="row"><h2>Store orders (<span id="sqn">' + list.length + '</span>)</h2>' + (canNew() ? '<button class="primary" style="flex:0;white-space:nowrap" onclick="location.hash=\'#/sq/new\'">+ Store order</button>' : '') + '</div>' +
+      '<p class="small muted">Karwa Marketing (Intimissi) stores ke orders. Store se aaya order warehouse yahan khud daalta hai, order photo, pending page aur execution page ki photo ke saath.</p>' +
+      '<div class="row"><select id="sqf">' + opts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === k ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
+      '<input type="date" id="sqd1" value="' + h(d1) + '"><input type="date" id="sqd2" value="' + h(d2) + '"></div>' +
+      '<div class="row" style="margin-top:8px"><select id="sqst"><option value="">Sab stores</option>' + storeList().map(function (x) { return '<option>' + h(x) + '</option>'; }).join('') + '</select><input id="sqq" placeholder="Store / tracking no search" style="flex:1;min-width:160px"></div>' +
+      '<div class="row" style="margin-top:6px;flex-wrap:wrap;gap:6px" id="sqstages"></div><p class="small" id="sqsum"></p><div id="sqlst"></div>';
+    function stOk(o, st) {
+      if (!st) return true; if (st === 'hold') return !!Number(o.hold);
+      if (st === 'nophoto') { var p = o.photos || {}; return !(p.order && p.pending && p.exec); }
+      if (st === 'new') return o.stage === 'new' || o.stage === 'punched'; if (st === 'picking') return o.stage === 'allocated'; if (st === 'checking') return o.stage === 'picked'; if (st === 'billing') return o.stage === 'checked';
+      if (st === 'ready') return o.stage === 'billed' || o.stage === 'packed'; return o.stage === st;
+    }
+    function scard(o) { var c = card(o); return c.slice(0, -4) + '<div class="small" style="margin-top:4px">🏬 <b>' + h(storeOf(o)) + '</b> ' + photoFlags(o) + '</div></a>'; }
+    function draw() {
+      $('sqd1').style.display = k === 'date' || k === 'range' ? '' : 'none'; $('sqd2').style.display = k === 'range' ? '' : 'none';
+      var r = qRange(k, d1, d2), stn = val('sqst'), q = sq.toUpperCase();
+      var mid = list.filter(function (o) { var d = String(o.order_date || ''); return (!r || d >= r[0] && d <= r[1]) && (!stn || storeOf(o) === stn) && (!q || (storeOf(o) + ' ' + o.dealer_name + ' ' + (o.track_no || '') + ' ' + ono(o)).toUpperCase().indexOf(q) >= 0); });
+      $('sqstages').innerHTML = stageOpts.map(function (s) { return '<button type="button" class="sm' + (qs === s[0] ? ' primary' : '') + '" data-sqs="' + s[0] + '">' + s[1] + ' (' + mid.filter(function (o) { return stOk(o, s[0]); }).length + ')</button>'; }).join('');
+      Array.prototype.forEach.call(document.querySelectorAll('[data-sqs]'), function (b) { b.onclick = function () { qs = b.getAttribute('data-sqs'); LS.setItem('imw_sqs', qs); draw(); }; });
+      var f = mid.filter(function (o) { return stOk(o, qs); });
+      $('sqn').textContent = f.length + (f.length !== list.length ? ' / ' + list.length : '');
+      $('sqsum').innerHTML = '<b>' + f.length + '</b> orders, <b>' + pcs(f.reduce(function (a, o) { return a + (Number(o.pcs) || 0); }, 0)) + '</b>';
+      $('sqlst').innerHTML = f.length ? f.map(scard).join('') : '<div class="card center muted">' + (list.length ? 'Is filter mein koi store order nahi.' : 'Abhi koi store order nahi. Store se order aaye to upar "+ Store order" dabayein, store chunein, brand aur pcs daalein, aur teen photo lagayein: order, pending page, execution page.') + '</div>';
+    }
+    $('sqf').onchange = function () { k = this.value; LS.setItem('imw_sqf', k); if ((k === 'date' || k === 'range') && !d1) { d1 = today(); $('sqd1').value = d1; LS.setItem('imw_sqd1', d1); } draw(); };
+    $('sqd1').onchange = function () { d1 = this.value; LS.setItem('imw_sqd1', d1); draw(); };
+    $('sqd2').onchange = function () { d2 = this.value; LS.setItem('imw_sqd2', d2); draw(); };
+    $('sqst').onchange = draw; $('sqq').oninput = function () { sq = this.value.trim(); draw(); };
+    draw();
+  }).catch(fail);
+}
+function vStoreNew(v, ed) {
+  if (!canNew()) return go('/sq');
+  var stores = storeList(), cur = ed ? (ed.store_name || '') : '', lines = ed ? ed.lines.map(function (l) { return { brand: l.brand, item: l.item, qty: l.ordered_qty }; }) : [{ brand: '' }], photos = {};
+  var have = ed ? { order: ed.photo_order_id, pending: ed.photo_pending_id, exec: ed.photo_exec_id } : null;
+  v.innerHTML = '<h2>' + (ed ? 'Edit store order ' + h(ono(ed)) : 'Naya store order (Karwa Marketing)') + '</h2><datalist id="dl_brand">' + BRANDS.map(function (b) { return '<option value="' + b + '">'; }).join('') + '</datalist>' +
+    '<div class="card"><label>Store *</label><select id="sst"><option value="">Store chunein</option>' + stores.map(function (x) { return '<option' + (x === cur ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select>' +
+    (ed ? '<div class="small muted">Dealer: ' + h(ed.dealer_name) + '</div>' : '<div class="small muted">Store ka dealer apne aap juda jayega (area / van plan ke liye). Na mile to naya "Intimissi store" dealer ban jayega.</div>') + '</div>' +
+    '<div class="card"><div class="grid2"><div><label>Order kisne liya (taken by)</label><input id="tb" value="' + h(ed ? ed.taken_by : S.user.name) + '"></div><div><label>Priority</label><select id="pri">' + S.m.priorities.map(function (x) { return '<option' + (ed && ed.priority === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></div>' +
+    '<div><label>Expected dispatch date (optional)</label><input id="exd" type="date" value="' + h(ed ? ed.expected_date : '') + '"></div><div><label>Source</label><input value="' + STORE_SRC + '" disabled></div></div></div>' +
+    '<div class="card"><h3>Brand / items</h3><div id="lns"></div><button class="sm" id="al">+ Brand line</button><div class="small muted" id="tot"></div></div>' +
+    '<div class="card"><h3>Photos</h3><p class="small muted">Phone par camera khulega, computer par file chunein. Photo apne aap chhoti ho jaati hai.</p>' + photoInputs(have) + '</div>' +
+    '<div class="card"><label>Remarks (optional)</label><textarea id="rm" rows="2">' + h(ed ? ed.remarks : '') + '</textarea></div><button class="primary big" id="sv">' + (ed ? 'Save changes' : 'Store order banayein') + '</button>';
+  function readLines() { lines = Array.prototype.map.call(document.querySelectorAll('.ln'), function (r) { return { brand: r.querySelector('.lb').value, item: r.querySelector('.li').value, qty: r.querySelector('.lq').value }; }); }
+  function total() { readLines(); $('tot').textContent = 'Total: ' + lines.reduce(function (a, l) { return a + (Number(l.qty) || 0); }, 0) + ' pcs'; }
+  function drawLines() {
+    $('lns').innerHTML = lines.map(function (l, i) { return '<div class="ln" style="border-bottom:1px solid var(--line);padding:6px 0"><div class="grid2"><div><label>Brand *</label><input class="lb" list="dl_brand" value="' + h(l.brand) + '"></div><div><label>Item (optional)</label><input class="li" value="' + h(l.item) + '"></div><div><label>Qty (pcs) *</label><input class="lq" type="number" min="1" inputmode="numeric" value="' + h(l.qty) + '"></div></div>' + (lines.length > 1 && !(ed && ed.picked_at) ? '<button class="sm" data-rm="' + i + '">Line hatayein</button>' : '') + '</div>'; }).join('');
+    Array.prototype.forEach.call(document.querySelectorAll('[data-rm]'), function (b) { b.onclick = function () { readLines(); lines.splice(Number(b.dataset.rm), 1); drawLines(); }; });
+    Array.prototype.forEach.call(document.querySelectorAll('.lq'), function (e) { e.oninput = total; }); total();
+  }
+  $('al').onclick = function () { if (ed && ed.picked_at) return toast('Pick ke baad line add nahi ho sakti', 'err'); readLines(); lines.push({ brand: '' }); drawLines(); };
+  drawLines(); bindPhotoInputs(photos);
+  $('sv').onclick = function () {
+    readLines(); var st = val('sst'); if (!st) return toast('Store chunein', 'err');
+    var miss = PHOTO_KINDS.filter(function (k) { return !photos[k[0]] && !(have && have[k[0]]); });
+    if (!ed && miss.length) return toast(miss.map(function (k) { return k[1]; }).join(', ') + ' ki photo lagayein', 'err');
+    var d = { store: st, source: STORE_SRC, priority: val('pri'), taken_by: val('tb'), expected_date: val('exd'), remarks: val('rm'), lines: lines };
+    var btn = $('sv'); btn.disabled = true;
+    var save = ed ? call('editOrder', Object.assign(d, { id: ed.id })).then(function () { return { id: ed.id }; }) : call('createStoreOrder', d);
+    save.then(function (r) {
+      var id = r.id; if (!ed) toast((r.track_no ? r.track_no + ' / ' : '') + r.order_no + ' ban gaya, photos upload ho rahi hain...');
+      return uploadAll(id, photos).then(function (bad) {
+        if (bad.length) toast('Order save hai, par ' + bad.map(kindLbl).join(', ') + ' upload nahi hui. Order page se dobara lagayein.', 'err'); else toast(ed ? 'Saved' : 'Store order aur photos save ho gaye ✔');
+        S.dl = null; go('/o/' + id);
+      });
+    }).catch(function (e) { btn.disabled = false; fail(e); });
+  };
+}
+/** Order detail: 3 photos with view + add / replace. Photo bytes are fetched only when tapped. */
+function storePhotosCard(v, o) {
+  var have = { order: o.photo_order_id, pending: o.photo_pending_id, exec: o.photo_exec_id }, box = document.createElement('div'); box.className = 'card';
+  box.innerHTML = '<h3>🏬 Store order: ' + h(storeOf(o)) + '</h3><div class="small" style="margin-bottom:6px">' + photoFlags(o) + '</div>' +
+    PHOTO_KINDS.map(function (k) { return '<div class="chk"><b style="flex:1">' + k[1] + '</b>' + (have[k[0]] ? '<button class="sm" data-pv="' + k[0] + '">Dekhein</button>' : '<span class="small short">Nahi lagi</span>') +
+      (canNew() ? '<label class="btn sm" style="flex:0;white-space:nowrap">' + (have[k[0]] ? 'Badlein' : '+ Lagayein') + '<input type="file" accept="image/*" capture="environment" data-pu="' + k[0] + '" style="display:none"></label>' : '') + '</div>'; }).join('');
+  v.insertBefore(box, v.children[1] || null);
+  Array.prototype.forEach.call(box.querySelectorAll('[data-pv]'), function (b) { b.onclick = function () {
+    var k = b.dataset.pv; call('getStorePhoto', { order_id: o.id, kind: k }).then(function (r) { sheet('<h3>' + kindLbl(k) + '</h3><img src="data:' + h(r.mime) + ';base64,' + r.b64 + '" style="width:100%;height:auto">'); }).catch(fail);
+  }; });
+  Array.prototype.forEach.call(box.querySelectorAll('[data-pu]'), function (inp) { inp.onchange = function () {
+    var k = inp.dataset.pu, f = inp.files[0]; if (!f) return;
+    compressImg(f).then(function (ph) { return uploadPhoto(o.id, k, ph); }).then(function () { toast(kindLbl(k) + ' lag gayi ✔'); vOrder(v, o.id); }).catch(function (e) { inp.value = ''; fail(e); });
+  }; });
+}
 function vNew(v, ed) {
   if (!canNew()) return go('/q');
   loadDealers().then(function (list) {
     var sel = ed ? list.filter(function (d) { return String(d.src_id) === String(ed.dealer_src_id); })[0] || { id: '', name: ed.dealer_name } : null, lines = ed ? ed.lines.map(function (l) { return { brand: l.brand, item: l.item, qty: l.ordered_qty, value: l.ordered_value }; }) : [{ brand: 'TRYLO' }];
     v.innerHTML = '<h2>' + (ed ? 'Edit ' + h(ono(ed)) : 'New order (phone / WhatsApp / walk-in)') + '</h2>' + dlists() + '<datalist id="dl_brand">' + BRANDS.map(function (b) { return '<option value="' + b + '">'; }).join('') + '</datalist>' +
       '<div class="card"><label>Dealer</label><div id="dsel"></div><input id="ds" placeholder="Dealer ka naam search karein"' + (ed && ed.picked_at ? '' : '') + '><div id="dres"></div>' + (ed ? '' : '<label class="chk"><input type="checkbox" id="nd"> Naya dealer add karein</label><div id="ndf" class="hidden grid2"><div><label>Naam</label><input id="ndn"></div><div><label>Mobile</label><input id="ndm" inputmode="tel"></div><div><label>Area</label><input id="nda" list="dl_area"></div><div><label>Zone</label><input id="ndz" list="dl_zone"></div></div>') + '</div>' +
-      '<div class="card"><div class="grid2"><div><label>Source</label><select id="src">' + S.m.sources.map(function (x) { return '<option' + (ed && ed.source === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></div><div><label>Priority</label><select id="pri">' + S.m.priorities.map(function (x) { return '<option' + (ed && ed.priority === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></div>' +
+      '<div class="card"><div class="grid2"><div><label>Source</label><select id="src">' + S.m.sources.filter(function (x) { return x !== STORE_SRC; }).map(function (x) { return '<option' + (ed && ed.source === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></div><div><label>Priority</label><select id="pri">' + S.m.priorities.map(function (x) { return '<option' + (ed && ed.priority === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></div>' +
       '<div><label>Order kisne liya (taken by)</label><input id="tb" value="' + h(ed ? ed.taken_by : S.user.name) + '"></div><div><label>Salesman (optional)</label><input id="sm" value="' + h(ed ? ed.salesman : '') + '"></div>' +
       '<div><label>Expected dispatch date</label><input id="exd" type="date" value="' + h(ed ? ed.expected_date : '') + '"></div></div></div>' +
       '<div class="card"><h3>Items</h3><div id="lns"></div><button class="sm" id="al">+ Line</button><div class="small muted" id="tot"></div></div>' +
