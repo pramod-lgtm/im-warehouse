@@ -209,11 +209,14 @@ function qRange(k, d1, d2) {
   }
 }
 function vQueue(v) {
-  call('orders', {}).then(function (list) {
+  var jobs = [call('orders', {})];
+  if (can('view')) jobs.push(call('dupList').catch(function () { return null; }));
+  Promise.all(jobs).then(function (rs) {
+    var list = rs[0], dupPairs = rs[1];
     var k = LS.getItem('imw_qf') || '', d1 = LS.getItem('imw_qd1') || '', d2 = LS.getItem('imw_qd2') || '';
     var qs = LS.getItem('imw_qs') || '', dq = '';
     var opts = [['', 'Sab dates'], ['today', 'Aaj'], ['yday', 'Kal'], ['week', 'Is hafte'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
-    var stageOpts = [['', 'Sab'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['hold', 'HOLD'], ['pending_bill', 'Pending for billing']];
+    var stageOpts = [['', 'Sab'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['hold', 'HOLD'], ['dup', '⚠ Duplicates'], ['pending_bill', 'Pending for billing']];
     v.innerHTML = '<div class="row"><h2>Meri queue (<span id="qn">' + list.length + '</span>)</h2>' + syncBtn() + '</div><p class="small muted">Last sync: ' + tm(S.m.last_sync) + '</p>' +
       '<div class="row"><select id="qf">' + opts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === k ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
       '<input type="date" id="qd1" value="' + h(d1) + '" title="Date / From"><input type="date" id="qd2" value="' + h(d2) + '" title="To"></div>' +
@@ -241,19 +244,29 @@ function vQueue(v) {
       base.forEach(function (o) { if (o.dealer_name) names[o.dealer_name] = 1; });
       $('qdl_list').innerHTML = Object.keys(names).sort().map(function (n) { return '<option value="' + h(n) + '">'; }).join('');
       var mid = base.filter(function (o) { return qDealerOk(o, dq); });
+      var pairs = dupPairs != null ? dupPairs : dupPairsFromOrders(list);
+      var shownDups = dupGroupsInList(dupGroupList(pairs), mid);
       $('qstages').innerHTML = stageOpts.map(function (s) {
-        var n = mid.filter(function (o) { return qStageOk(o, s[0]); }).length;
-        return '<button type="button" class="sm' + (qs === s[0] ? ' primary' : '') + '" data-qs="' + s[0] + '">' + s[1] + ' (' + n + ')</button>';
+        var n = s[0] === 'dup' ? shownDups.length : mid.filter(function (o) { return qStageOk(o, s[0]); }).length;
+        return '<button type="button" class="sm' + (qs === s[0] ? ' primary' : (s[0] === 'dup' && n ? ' danger' : '')) + '" data-qs="' + s[0] + '">' + s[1] + ' (' + n + ')</button>';
       }).join('');
       Array.prototype.forEach.call(document.querySelectorAll('#qstages [data-qs]'), function (b) {
         b.onclick = function () { qs = b.getAttribute('data-qs'); LS.setItem('imw_qs', qs); draw(); };
       });
-      var f = mid.filter(function (o) { return qStageOk(o, qs); });
-      var tp = f.reduce(function (a, o) { return a + (Number(o.pcs) || 0); }, 0);
-      $('qn').textContent = f.length + (r || dq || qs ? ' / ' + list.length : '');
       var bits = [];
       if (r) bits.push('Order date ' + h(dmy(r[0] === '0000-00-00' ? '' : r[0]) || '...') + ' se ' + h(dmy(r[1] === '9999-12-31' ? '' : r[1]) || '...'));
       if (dq) bits.push('dealer "' + h(dq) + '"');
+      if (qs === 'dup') {
+        var oc = shownDups.reduce(function (a, g) { return a + g.orders.length; }, 0);
+        $('qn').textContent = shownDups.length + (r || dq || qs ? ' / ' + list.length : '');
+        $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : '') + '<b>' + shownDups.length + '</b> duplicate groups, <b>' + oc + '</b> orders · <a href="#/dup">Duplicates page</a>';
+        $('qlst').innerHTML = shownDups.length ? dupGroupCardsHtml(shownDups, isMgr()) : '<div class="card center muted">' + ((r || dq) ? 'Is filter mein koi possible duplicate nahi.' : 'Koi possible duplicate nahi 👍') + '</div>';
+        bindDupGroupActions($('qlst'), shownDups, function () { vQueue(v); });
+        return;
+      }
+      var f = mid.filter(function (o) { return qStageOk(o, qs); });
+      var tp = f.reduce(function (a, o) { return a + (Number(o.pcs) || 0); }, 0);
+      $('qn').textContent = f.length + (r || dq || qs ? ' / ' + list.length : '');
       $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : 'Sab: ') + '<b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>';
       $('qlst').innerHTML = f.length ? f.map(card).join('') : '<div class="card center muted">' + ((r || dq || qs) ? 'Is filter mein koi order nahi.' : 'Abhi koi kaam nahi.') + '</div>';
     }
@@ -308,6 +321,52 @@ function dupGroupList(list) {
     return g;
   });
 }
+/** Build pairs from list-row .dups ids when dupList is not available (non-view roles). */
+function dupPairsFromOrders(list) {
+  var by = {}, seen = {}, pairs = [];
+  (list || []).forEach(function (o) { if (o && o.id != null) by[o.id] = o; });
+  (list || []).forEach(function (o) {
+    (o.dups || []).forEach(function (id) {
+      var a = Number(o.id), b = Number(id); if (!b || a === b) return;
+      var k = a < b ? a + '-' + b : b + '-' + a; if (seen[k]) return; seen[k] = 1;
+      var other = by[b]; if (!other) return;
+      pairs.push({ a: o, b: other, brands: [], items: [], why: '', days: 0 });
+    });
+  });
+  return pairs;
+}
+/** Groups that have at least one order present in list (after date / dealer filter). */
+function dupGroupsInList(groups, list) {
+  var ids = {};
+  (list || []).forEach(function (o) { ids[o.id] = 1; });
+  return (groups || []).filter(function (g) { return (g.orders || []).some(function (o) { return ids[o.id]; }); });
+}
+function dupGroupCardsHtml(groups, withActions) {
+  return (groups || []).map(function (g, i) {
+    var name = (g.orders[0] && g.orders[0].dealer_name) || '', meta = Object.keys(g.brands).concat(Object.keys(g.items));
+    if (g.days) meta = meta.concat([g.days + ' din ka fark']);
+    return '<div class="card" data-g="' + i + '" style="border:2px solid #c0392b"><div><b>' + h(name) + '</b> <span class="small muted">' + h(meta.join(' • ')) + ' • ' + g.orders.length + ' orders</span></div>' +
+      g.orders.map(function (o) { return '<label class="chk"><input type="checkbox" class="dsel" data-id="' + o.id + '" checked> <a href="#/o/' + o.id + '">' + trk(o) + h(ono(o)) + '</a><span class="small">' + h(srcOf(o)) + ' • ' + h(dmy(o.order_date)) + ' • ' + dupLine(o) + ' • ' + h(stageLbl(o.stage)) + '</span></label>'; }).join('') +
+      (withActions ? '<div class="row"><button class="sm primary" data-m="' + i + '">Merge selected</button><button class="sm" data-n="' + i + '">Not duplicate</button></div>' : '') + '</div>';
+  }).join('');
+}
+function bindDupGroupActions(root, groups, onDone) {
+  if (!root) return;
+  Array.prototype.forEach.call(root.querySelectorAll('[data-m]'), function (b) {
+    b.onclick = function () {
+      var g = groups[b.dataset.m], ids = Array.prototype.map.call(root.querySelectorAll('.card[data-g="' + b.dataset.m + '"] .dsel:checked'), function (x) { return Number(x.dataset.id); });
+      var selected = g.orders.filter(function (o) { return ids.indexOf(Number(o.id)) >= 0; });
+      if (selected.length < 2) return toast('Kam se kam 2 orders chunein', 'err');
+      mergeDialog(selected, onDone);
+    };
+  });
+  Array.prototype.forEach.call(root.querySelectorAll('[data-n]'), function (b) {
+    b.onclick = function () {
+      var g = groups[b.dataset.n]; if (!confirm('In sab ko duplicate nahi maane? Flag hamesha ke liye hat jayega.')) return;
+      Promise.all((g.pairs || []).map(function (p) { return call('dismissDup', { a: p.a.id, b: p.b.id }); })).then(function () { toast('Flag hata diya'); if (onDone) onDone(); }).catch(fail);
+    };
+  });
+}
 function dupCard(o, others) {
   if (!others || !others.length || !isMgr()) return '';
   return '<div class="card" style="border:2px solid #c0392b"><h3>⚠ Possible duplicate (' + others.length + ')</h3><p class="small muted">Same dealer, overlapping items / amount, paas ki date. Bill se pehle merge kar sakte ho.</p>' +
@@ -347,27 +406,8 @@ function vDups(v) {
     var groups = dupGroupList(list), days = (S.m.dup_days != null ? S.m.dup_days : 2);
     var rule = 'Same dealer, overlapping brand / item / amount, order date ' + days + ' din ke andar, bill se pehle. Koi bhi source (Sales Tracker, warehouse, store, phone).';
     v.innerHTML = '<div class="row"><h2>⚠ Possible duplicates (' + groups.length + ')</h2></div><p class="small muted">' + h(rule) + '</p>' +
-      (groups.map(function (g, i) {
-        var name = (g.orders[0] && g.orders[0].dealer_name) || '', meta = Object.keys(g.brands).concat(Object.keys(g.items));
-        if (g.days) meta = meta.concat([g.days + ' din ka fark']);
-        return '<div class="card" data-g="' + i + '"><div><b>' + h(name) + '</b> <span class="small muted">' + h(meta.join(' • ')) + ' • ' + g.orders.length + ' orders</span></div>' +
-          g.orders.map(function (o) { return '<label class="chk"><input type="checkbox" class="dsel" data-id="' + o.id + '" checked> <a href="#/o/' + o.id + '">' + trk(o) + h(ono(o)) + '</a><span class="small">' + h(srcOf(o)) + ' • ' + h(dmy(o.order_date)) + ' • ' + dupLine(o) + ' • ' + h(stageLbl(o.stage)) + '</span></label>'; }).join('') +
-          (isMgr() ? '<div class="row"><button class="sm primary" data-m="' + i + '">Merge selected</button><button class="sm" data-n="' + i + '">Not duplicate</button></div>' : '') + '</div>';
-      }).join('') || '<div class="card center muted">Koi possible duplicate nahi 👍</div>');
-    Array.prototype.forEach.call(v.querySelectorAll('[data-m]'), function (b) {
-      b.onclick = function () {
-        var g = groups[b.dataset.m], ids = Array.prototype.map.call(v.querySelectorAll('.card[data-g="' + b.dataset.m + '"] .dsel:checked'), function (x) { return Number(x.dataset.id); });
-        var selected = g.orders.filter(function (o) { return ids.indexOf(Number(o.id)) >= 0; });
-        if (selected.length < 2) return toast('Kam se kam 2 orders chunein', 'err');
-        mergeDialog(selected, function () { vDups(v); });
-      };
-    });
-    Array.prototype.forEach.call(v.querySelectorAll('[data-n]'), function (b) {
-      b.onclick = function () {
-        var g = groups[b.dataset.n]; if (!confirm('In sab ko duplicate nahi maane? Flag hamesha ke liye hat jayega.')) return;
-        Promise.all(g.pairs.map(function (p) { return call('dismissDup', { a: p.a.id, b: p.b.id }); })).then(function () { toast('Flag hata diya'); vDups(v); }).catch(fail);
-      };
-    });
+      (dupGroupCardsHtml(groups, isMgr()) || '<div class="card center muted">Koi possible duplicate nahi 👍</div>');
+    bindDupGroupActions(v, groups, function () { vDups(v); });
   }).catch(fail);
 }
 

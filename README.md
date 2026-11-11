@@ -37,7 +37,7 @@ Billing > "Download template" gives `Billing_Import_Template.xlsx`; its headers 
 "+ New order" (admin, manager, dispatch): pick a dealer or add a new one, source, taken by, salesman, brand lines (brand, item, qty, value), remarks, expected dispatch date, priority. Manual orders are numbered W-1, W-2... (Sales Tracker orders show as ST-<id>), follow the same stages, hold and bill matching, and can be edited or cancelled (with reason) until billed. Source shows as a badge, a filter in All orders, on the dashboard and in the CSV.
 
 ## Possible duplicates
-Admin / warehouse manager: bottom nav **Duplicates**, or Sab orders > **⚠ Duplicates**, or the filter **⚠ Possible duplicates**, or the red badge on an order.
+Admin / warehouse manager: Meri queue chip **⚠ Duplicates** (alongside Picking, Checking, Billing, HOLD; dealer search applies), bottom nav **Duplicates**, Sab orders > **⚠ Duplicates**, the filter **⚠ Possible duplicates**, or the red badge on an order.
 
 The list groups likely-duplicate open (not yet billed) orders: same dealer, overlapping brand or item or similar qty/amount, order dates within Settings `dup_days` (default 2). Any source (Sales Tracker, warehouse W-, store, phone). Set Settings `dup_st_only` to 1 to go back to only Sales Tracker vs warehouse pairs.
 
