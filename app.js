@@ -29,6 +29,7 @@ function signOut(local) { if (!local) call('logout', {}, true).catch(function ()
 function masters(force) { if (S.m && !force) return Promise.resolve(S.m); return call('masters').then(function (m) { S.m = m; return m; }); }
 function role() { return S.user && S.user.role; }
 function isMgr() { return role() === 'admin' || role() === 'warehouse_manager'; }
+function isAdmin() { return role() === 'admin'; }
 function can(p) { var P = { view: ['admin', 'warehouse_manager'], bills: ['admin', 'warehouse_manager', 'biller'], hold: ['admin', 'warehouse_manager', 'biller', 'coordinator'], holdmgr: ['admin', 'warehouse_manager', 'coordinator'], delivery: ['admin', 'warehouse_manager', 'dispatch'], sync: ['admin', 'warehouse_manager', 'biller'], manage: ['admin'], recvtime: ['admin', 'warehouse_manager'], routes: ['admin', 'warehouse_manager', 'coordinator'] }; return (P[p] || []).indexOf(role()) >= 0; }
 function stageLbl(s) { return (S.m && S.m.stage_label[s]) || s; }
 function ono(o) { return o.order_no || (/^W-/.test(o.src_id) ? o.src_id : '#' + o.id); }
@@ -373,7 +374,11 @@ function dupGroupCardsHtml(groups, withActions) {
       if (billedOs.length && openOs.length) {
         acts = openOs.map(function (o) {
           return billedOs.map(function (b) { return '<button class="sm primary" data-c="' + i + '" data-open="' + o.id + '" data-billed="' + b.id + '">Cancel as duplicate of ' + h(onoBilled(b)) + '</button>'; }).join(' ');
-        }).join(' ') + '<button class="sm" data-n="' + i + '">Not duplicate</button>';
+        }).join(' ');
+        if (isAdmin()) acts += openOs.map(function (o) {
+          return '<button class="sm danger" data-del="' + i + '" data-open="' + o.id + '" data-billed="' + billedOs[0].id + '">Delete duplicate ' + h(ono(o)) + '</button>';
+        }).join(' ');
+        acts += '<button class="sm" data-n="' + i + '">Not duplicate</button>';
       } else {
         acts = '<button class="sm primary" data-m="' + i + '">Merge selected</button><button class="sm" data-n="' + i + '">Not duplicate</button>';
       }
@@ -403,6 +408,17 @@ function bindDupGroupActions(root, groups, onDone) {
       call('cancelAsDup', { open_id: open.id, billed_id: billed.id }).then(function () { toast('Duplicate mark ho gaya, open order hide ho gaya'); if (onDone) onDone(); }).catch(fail);
     };
   });
+  Array.prototype.forEach.call(root.querySelectorAll('[data-del]'), function (b) {
+    b.onclick = function () {
+      if (!isAdmin()) return toast('Sirf admin delete kar sakta hai', 'err');
+      var openId = Number(b.getAttribute('data-open')), billedId = Number(b.getAttribute('data-billed'));
+      var g = groups[b.dataset.del], open = g.orders.filter(function (o) { return Number(o.id) === openId; })[0], billed = g.orders.filter(function (o) { return Number(o.id) === billedId; })[0];
+      if (!open || !billed) return;
+      if (isDupBilled(open) || open.invoice_no) return toast('Billed / invoice wala order delete nahi ho sakta', 'err');
+      if (!confirm('Delete ' + ono(open) + '? Sirf yeh open duplicate delete hoga. Billed ' + onoBilled(billed) + ' nahi chhedega. Wapas queue mein nahi aayega.')) return;
+      call('deleteDup', { open_id: open.id, billed_id: billed.id }).then(function () { toast(ono(open) + ' delete ho gaya'); if (onDone) onDone(); }).catch(fail);
+    };
+  });
   Array.prototype.forEach.call(root.querySelectorAll('[data-n]'), function (b) {
     b.onclick = function () {
       var g = groups[b.dataset.n]; if (!confirm('In sab ko duplicate nahi maane? Flag hamesha ke liye hat jayega.')) return;
@@ -417,8 +433,8 @@ function dupCard(o, others) {
     others.map(function (x) {
       var billedOther = isDupBilled(x), act = '';
       if (!meBilled && !billedOther) act = '<button class="sm primary dupm" data-id="' + x.id + '">Merge</button>';
-      else if (meBilled && !billedOther) act = '<button class="sm primary dupc" data-open="' + x.id + '" data-billed="' + o.id + '">Cancel as duplicate of ' + h(onoBilled(o)) + '</button>';
-      else if (!meBilled && billedOther) act = '<button class="sm primary dupc" data-open="' + o.id + '" data-billed="' + x.id + '">Cancel as duplicate of ' + h(onoBilled(x)) + '</button>';
+      else if (meBilled && !billedOther) act = '<button class="sm primary dupc" data-open="' + x.id + '" data-billed="' + o.id + '">Cancel as duplicate of ' + h(onoBilled(o)) + '</button>' + (isAdmin() ? '<button class="sm danger dupdel" data-open="' + x.id + '" data-billed="' + o.id + '">Delete duplicate ' + h(ono(x)) + '</button>' : '');
+      else if (!meBilled && billedOther) act = '<button class="sm primary dupc" data-open="' + o.id + '" data-billed="' + x.id + '">Cancel as duplicate of ' + h(onoBilled(x)) + '</button>' + (isAdmin() ? '<button class="sm danger dupdel" data-open="' + o.id + '" data-billed="' + x.id + '">Delete duplicate ' + h(ono(o)) + '</button>' : '');
       return '<div class="chk"><a href="#/o/' + x.id + '">' + trk(x) + h(ono(x)) + '</a><span class="small">' + h(srcOf(x)) + ' • ' + h(dmy(x.order_date)) + ' • ' + dupLine(x) + ' • ' + h(stageLbl(x.stage)) + (x.invoice_no ? ' • Inv ' + h(x.invoice_no) : '') + '</span>' + act + '<button class="sm dupn" data-id="' + x.id + '">Not duplicate</button></div>';
     }).join('') +
     (!meBilled && others.filter(function (x) { return !isDupBilled(x); }).length ? '<div class="row"><button class="sm primary" id="dma">Merge selected (2+)</button></div>' : '') + '</div>';
@@ -456,6 +472,18 @@ function bindDup(v, o, others) {
       if (!open || !billed) return;
       if (!confirm(ono(open) + ' ko ' + onoBilled(billed) + ' ka duplicate mark karke cancel karein? Pcs add nahi honge.')) return;
       call('cancelAsDup', { open_id: open.id, billed_id: billed.id }).then(function () { toast('Duplicate mark ho gaya'); go('/o/' + billed.id); }).catch(fail);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.dupdel'), function (btn) {
+    btn.onclick = function () {
+      if (!isAdmin()) return toast('Sirf admin delete kar sakta hai', 'err');
+      var openId = Number(btn.getAttribute('data-open')), billedId = Number(btn.getAttribute('data-billed'));
+      var open = Number(o.id) === openId ? o : (others || []).filter(function (y) { return Number(y.id) === openId; })[0];
+      var billed = Number(o.id) === billedId ? o : (others || []).filter(function (y) { return Number(y.id) === billedId; })[0];
+      if (!open || !billed) return;
+      if (isDupBilled(open) || open.invoice_no) return toast('Billed / invoice wala order delete nahi ho sakta', 'err');
+      if (!confirm('Delete ' + ono(open) + '? Sirf yeh open duplicate delete hoga. Billed ' + onoBilled(billed) + ' nahi chhedega. Wapas queue mein nahi aayega.')) return;
+      call('deleteDup', { open_id: open.id, billed_id: billed.id }).then(function () { toast(ono(open) + ' delete ho gaya'); go('/o/' + billed.id); }).catch(fail);
     };
   });
   Array.prototype.forEach.call(document.querySelectorAll('.dupn'), function (btn) { btn.onclick = function () { if (!confirm('Ye duplicate nahi hai? Flag hamesha ke liye hat jayega.')) return; call('dismissDup', { a: o.id, b: Number(btn.dataset.id) }).then(function () { toast('Flag hata diya'); vOrder(v, o.id); }).catch(fail); }; });
