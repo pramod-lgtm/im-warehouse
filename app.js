@@ -81,7 +81,7 @@ function sheet(html) { var d = document.createElement('div'); d.className = 'she
 
 // ---------------- router
 function go(p) { if (location.hash !== '#' + p) location.hash = '#' + p; else route(); }
-var NAV = [['/q', '📋', 'Meri queue', null], ['/sq', '🛍️', 'Store orders', null], ['/all', '🏬', 'Sab orders', 'view'], ['/dup', '⚠', 'Duplicates', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
+var NAV = [['/q', '📋', 'Meri queue', null], ['/sq', '🛍️', 'Store orders', null], ['/all', '🏬', 'Sab orders', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
 function nav(cur) {
   var n = $('nav'); if (!S.user) { n.classList.add('hidden'); return; }
   n.innerHTML = NAV.filter(function (x) { return !x[3] || can(x[3]); }).map(function (x) { return '<a href="#' + x[0] + '" class="' + (cur.indexOf(x[0]) === 0 ? 'on' : '') + '"><i>' + x[1] + '</i>' + x[2] + '</a>'; }).join('');
