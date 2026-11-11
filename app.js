@@ -187,12 +187,16 @@ function vSetup(v) {
 }
 
 // ---------------- lists
-function card(o) {
-  return '<a class="card" style="display:block;text-decoration:none;color:inherit" href="#/o/' + o.id + '"><div class="row"><b>' + trk(o) + h(ono(o)) + ' ' + h(o.dealer_name) + '</b><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div>' +
+function cardInner(o) {
+  return '<div class="row"><b>' + trk(o) + h(ono(o)) + ' ' + h(o.dealer_name) + '</b><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div>' +
     '<div class="small">' + slaBadge(o) + '</div><div class="small muted">' + h(dmy(o.order_date)) + ' • ' + (o.zone ? '<b>' + h(o.zone) + '</b> / ' : '') + h(o.area || 'area ?') + (o.route ? ' • ' + h(o.route) : '') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.salesman ? ' • ' + h(o.salesman) : '') + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.expected_date ? ' • exp ' + h(dmy(o.expected_date)) : '') + (o.plan_delivery_date ? ' • plan ' + h(dmy(o.plan_delivery_date)) + (o.plan_van ? ' ' + h(o.plan_van) : '') : '') + '</div>' +
     '<div class="small">' + (o.lines || []).map(function (l) { return h(l.brand) + ' ' + pcs(l.ordered_qty); }).join(' + ') + ((o.lines || []).length > 1 ? ' = <b>' + pcs(o.pcs) + '</b>' : '') +
     [['Punch', o.punch_name], ['P', o.picker_name], ['C', o.checker_name], ['B', o.biller_name], ['Pk', o.packer_name]].filter(function (x) { return x[1]; }).map(function (x) { return ' • ' + x[0] + ': ' + h(x[1]); }).join('') + (o.invoice_no ? ' • Inv ' + h(o.invoice_no) : '') + (o.vehicle || o.delivery_mode ? ' • ' + h(o.vehicle || o.delivery_mode) : '') + '</div>' +
-    (Number(o.hold) ? '<div class="small short">Hold: ' + h(o.hold_reason) + ' ' + h(o.hold_note) + '</div>' : '') + (o.stage === 'cancelled' ? '<div class="small short">Cancel: ' + h(o.cancel_reason) + '</div>' : '') + '</a>';
+    (Number(o.hold) ? '<div class="small short">Hold: ' + h(o.hold_reason) + ' ' + h(o.hold_note) + '</div>' : '') + (o.stage === 'cancelled' ? '<div class="small short">Cancel: ' + h(o.cancel_reason) + '</div>' : '');
+}
+function card(o, sel) {
+  if (!sel) return '<a class="card" style="display:block;text-decoration:none;color:inherit" href="#/o/' + o.id + '">' + cardInner(o) + '</a>';
+  return '<div class="card" style="display:flex;align-items:flex-start;gap:8px"><label style="flex:none;padding-top:2px"><input type="checkbox" class="qsel" data-id="' + o.id + '" style="width:22px;height:22px"></label><a style="flex:1;text-decoration:none;color:inherit" href="#/o/' + o.id + '">' + cardInner(o) + '</a></div>';
 }
 function newBtn() { return canNew() ? '<button class="sm primary" onclick="location.hash=\'#/new\'">+ New order</button>' : ''; }
 function syncBtn() { return newBtn() + (can('sync') ? '<button class="sm" id="sync">🔄 Sync now</button>' : ''); }
@@ -266,9 +270,17 @@ function vQueue(v) {
       }
       var f = mid.filter(function (o) { return qStageOk(o, qs); });
       var tp = f.reduce(function (a, o) { return a + (Number(o.pcs) || 0); }, 0);
+      var canMark = isMgr() && !!dq;
       $('qn').textContent = f.length + (r || dq || qs ? ' / ' + list.length : '');
-      $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : 'Sab: ') + '<b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>';
-      $('qlst').innerHTML = f.length ? f.map(card).join('') : '<div class="card center muted">' + ((r || dq || qs) ? 'Is filter mein koi order nahi.' : 'Abhi koi kaam nahi.') + '</div>';
+      $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : 'Sab: ') + '<b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>' +
+        (canMark ? ' · <button type="button" class="sm primary" id="qmd">Mark duplicate</button> <span class="small muted">2+ orders select karke mark karein</span>' : '');
+      $('qlst').innerHTML = f.length ? f.map(function (o) { return card(o, canMark); }).join('') : '<div class="card center muted">' + ((r || dq || qs) ? 'Is filter mein koi order nahi.' : 'Abhi koi kaam nahi.') + '</div>';
+      if (canMark && $('qmd')) $('qmd').onclick = function () {
+        var ids = Array.prototype.map.call(v.querySelectorAll('.qsel:checked'), function (x) { return Number(x.dataset.id); });
+        if (ids.length < 2) return toast('Kam se kam 2 orders chunein', 'err');
+        if (!confirm(ids.length + ' orders ko possible duplicate mark karein? Duplicates tab mein dikhenge.')) return;
+        call('markDups', { ids: ids }).then(function () { toast('Duplicate mark ho gaya'); qs = 'dup'; LS.setItem('imw_qs', qs); vQueue(v); }).catch(fail);
+      };
     }
     $('qf').onchange = function () { k = this.value; LS.setItem('imw_qf', k); if ((k === 'date' || k === 'range') && !d1) { d1 = today(); $('qd1').value = d1; LS.setItem('imw_qd1', d1); } draw(); };
     $('qd1').onchange = function () { d1 = this.value; LS.setItem('imw_qd1', d1); draw(); };
@@ -314,6 +326,7 @@ function dupGroupList(list) {
   (list || []).forEach(function (p) {
     if (!p || !p.a) return; var g = groups[find(p.a.id)]; if (!g) return;
     g.pairs.push(p); (p.brands || []).forEach(function (b) { g.brands[b] = 1; }); (p.items || []).forEach(function (b) { g.items[b] = 1; }); if (p.days > g.days) g.days = p.days;
+    if (p.manual) g.manual = 1; if (p.billed) g.billed = 1; if (p.billed_id) g.billed_id = p.billed_id;
   });
   return Object.keys(groups).map(function (k) {
     var g = groups[k];
@@ -341,13 +354,33 @@ function dupGroupsInList(groups, list) {
   (list || []).forEach(function (o) { ids[o.id] = 1; });
   return (groups || []).filter(function (g) { return (g.orders || []).some(function (o) { return ids[o.id]; }); });
 }
+function isDupBilled(o) {
+  if (!o) return false;
+  if (o.invoice_no) return true;
+  var st = (S.m && S.m.stages) || [];
+  return st.indexOf(o.stage) >= 0 && st.indexOf('billed') >= 0 && st.indexOf(o.stage) >= st.indexOf('billed');
+}
+function onoBilled(o) { return ono(o) + (o.invoice_no ? ' (Inv ' + o.invoice_no + ')' : ''); }
 function dupGroupCardsHtml(groups, withActions) {
   return (groups || []).map(function (g, i) {
     var name = (g.orders[0] && g.orders[0].dealer_name) || '', meta = Object.keys(g.brands).concat(Object.keys(g.items));
     if (g.days) meta = meta.concat([g.days + ' din ka fark']);
+    if (g.manual) meta = meta.concat(['manual']);
+    var billedOs = g.orders.filter(isDupBilled), openOs = g.orders.filter(function (o) { return !isDupBilled(o); });
+    if (billedOs.length && openOs.length) meta = meta.concat(['ek billed + open']);
+    var acts = '';
+    if (withActions) {
+      if (billedOs.length && openOs.length) {
+        acts = openOs.map(function (o) {
+          return billedOs.map(function (b) { return '<button class="sm primary" data-c="' + i + '" data-open="' + o.id + '" data-billed="' + b.id + '">Cancel as duplicate of ' + h(onoBilled(b)) + '</button>'; }).join(' ');
+        }).join(' ') + '<button class="sm" data-n="' + i + '">Not duplicate</button>';
+      } else {
+        acts = '<button class="sm primary" data-m="' + i + '">Merge selected</button><button class="sm" data-n="' + i + '">Not duplicate</button>';
+      }
+    }
     return '<div class="card" data-g="' + i + '" style="border:2px solid #c0392b"><div><b>' + h(name) + '</b> <span class="small muted">' + h(meta.join(' • ')) + ' • ' + g.orders.length + ' orders</span></div>' +
-      g.orders.map(function (o) { return '<label class="chk"><input type="checkbox" class="dsel" data-id="' + o.id + '" checked> <a href="#/o/' + o.id + '">' + trk(o) + h(ono(o)) + '</a><span class="small">' + h(srcOf(o)) + ' • ' + h(dmy(o.order_date)) + ' • ' + dupLine(o) + ' • ' + h(stageLbl(o.stage)) + '</span></label>'; }).join('') +
-      (withActions ? '<div class="row"><button class="sm primary" data-m="' + i + '">Merge selected</button><button class="sm" data-n="' + i + '">Not duplicate</button></div>' : '') + '</div>';
+      g.orders.map(function (o) { return '<label class="chk"><input type="checkbox" class="dsel" data-id="' + o.id + '" checked> <a href="#/o/' + o.id + '">' + trk(o) + h(ono(o)) + '</a><span class="small">' + h(srcOf(o)) + ' • ' + h(dmy(o.order_date)) + ' • ' + dupLine(o) + ' • ' + h(stageLbl(o.stage)) + (isDupBilled(o) && o.invoice_no ? ' • Inv ' + h(o.invoice_no) : '') + '</span></label>'; }).join('') +
+      (acts ? '<div class="row" style="flex-wrap:wrap;gap:6px">' + acts + '</div>' : '') + '</div>';
   }).join('');
 }
 function bindDupGroupActions(root, groups, onDone) {
@@ -357,7 +390,17 @@ function bindDupGroupActions(root, groups, onDone) {
       var g = groups[b.dataset.m], ids = Array.prototype.map.call(root.querySelectorAll('.card[data-g="' + b.dataset.m + '"] .dsel:checked'), function (x) { return Number(x.dataset.id); });
       var selected = g.orders.filter(function (o) { return ids.indexOf(Number(o.id)) >= 0; });
       if (selected.length < 2) return toast('Kam se kam 2 orders chunein', 'err');
+      if (selected.some(isDupBilled)) return toast('Billed order merge nahi ho sakta. Cancel as duplicate use karein.', 'err');
       mergeDialog(selected, onDone);
+    };
+  });
+  Array.prototype.forEach.call(root.querySelectorAll('[data-c]'), function (b) {
+    b.onclick = function () {
+      var openId = Number(b.getAttribute('data-open')), billedId = Number(b.getAttribute('data-billed'));
+      var g = groups[b.dataset.c], open = g.orders.filter(function (o) { return Number(o.id) === openId; })[0], billed = g.orders.filter(function (o) { return Number(o.id) === billedId; })[0];
+      if (!open || !billed) return;
+      if (!confirm(ono(open) + ' ko ' + onoBilled(billed) + ' ka duplicate mark karke cancel (Merge ho gaya) karein? Pcs add nahi honge.')) return;
+      call('cancelAsDup', { open_id: open.id, billed_id: billed.id }).then(function () { toast('Duplicate mark ho gaya, open order hide ho gaya'); if (onDone) onDone(); }).catch(fail);
     };
   });
   Array.prototype.forEach.call(root.querySelectorAll('[data-n]'), function (b) {
@@ -369,9 +412,16 @@ function bindDupGroupActions(root, groups, onDone) {
 }
 function dupCard(o, others) {
   if (!others || !others.length || !isMgr()) return '';
-  return '<div class="card" style="border:2px solid #c0392b"><h3>⚠ Possible duplicate (' + others.length + ')</h3><p class="small muted">Same dealer, overlapping items / amount, paas ki date. Bill se pehle merge kar sakte ho.</p>' +
-    others.map(function (x) { return '<div class="chk"><a href="#/o/' + x.id + '">' + trk(x) + h(ono(x)) + '</a><span class="small">' + h(srcOf(x)) + ' • ' + h(dmy(x.order_date)) + ' • ' + dupLine(x) + ' • ' + h(stageLbl(x.stage)) + '</span><button class="sm primary dupm" data-id="' + x.id + '">Merge</button><button class="sm dupn" data-id="' + x.id + '">Not duplicate</button></div>'; }).join('') +
-    (others.length > 1 ? '<div class="row"><button class="sm primary" id="dma">Merge selected (2+)</button></div>' : '') + '</div>';
+  var meBilled = isDupBilled(o);
+  return '<div class="card" style="border:2px solid #c0392b"><h3>⚠ Possible duplicate (' + others.length + ')</h3><p class="small muted">Same dealer, overlapping items / amount, paas ki date. Open + open: merge. Ek billed + ek open: open ko cancel as duplicate.</p>' +
+    others.map(function (x) {
+      var billedOther = isDupBilled(x), act = '';
+      if (!meBilled && !billedOther) act = '<button class="sm primary dupm" data-id="' + x.id + '">Merge</button>';
+      else if (meBilled && !billedOther) act = '<button class="sm primary dupc" data-open="' + x.id + '" data-billed="' + o.id + '">Cancel as duplicate of ' + h(onoBilled(o)) + '</button>';
+      else if (!meBilled && billedOther) act = '<button class="sm primary dupc" data-open="' + o.id + '" data-billed="' + x.id + '">Cancel as duplicate of ' + h(onoBilled(x)) + '</button>';
+      return '<div class="chk"><a href="#/o/' + x.id + '">' + trk(x) + h(ono(x)) + '</a><span class="small">' + h(srcOf(x)) + ' • ' + h(dmy(x.order_date)) + ' • ' + dupLine(x) + ' • ' + h(stageLbl(x.stage)) + (x.invoice_no ? ' • Inv ' + h(x.invoice_no) : '') + '</span>' + act + '<button class="sm dupn" data-id="' + x.id + '">Not duplicate</button></div>';
+    }).join('') +
+    (!meBilled && others.filter(function (x) { return !isDupBilled(x); }).length ? '<div class="row"><button class="sm primary" id="dma">Merge selected (2+)</button></div>' : '') + '</div>';
 }
 function dupSide(x) {
   return '<div class="card"><label><input type="radio" name="dk" value="' + x.id + '"> <b>Ye rakhein</b></label><div><b>' + trk(x) + h(ono(x)) + '</b></div><div class="small">' + h(srcOf(x)) + (x.salesman ? ' • salesman ' + h(x.salesman) : '') + (x.taken_by ? ' • liya ' + h(x.taken_by) : '') + '</div><div class="small">' + h(dmy(x.order_date)) + ' ' + tm(x.src_at || x.created_at) + '</div><div class="small">' + dupLine(x) + '</div><div class="small">' + h(stageLbl(x.stage)) + (Number(x.hold) ? ' • HOLD' : '') + (dupPicked(x) ? ' • pick ho chuka' : '') + '</div>' + (x.remarks ? '<div class="small muted">Remark: ' + h(x.remarks) + '</div>' : '') + '</div>';
@@ -398,13 +448,23 @@ function mergeDialog(a, b, done) {
 }
 function bindDup(v, o, others) {
   Array.prototype.forEach.call(document.querySelectorAll('.dupm'), function (btn) { btn.onclick = function () { var x = (others || []).filter(function (y) { return Number(y.id) === Number(btn.dataset.id); })[0]; if (x) mergeDialog([o, x], function (kept) { go('/o/' + kept); }); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('.dupc'), function (btn) {
+    btn.onclick = function () {
+      var openId = Number(btn.getAttribute('data-open')), billedId = Number(btn.getAttribute('data-billed'));
+      var open = Number(o.id) === openId ? o : (others || []).filter(function (y) { return Number(y.id) === openId; })[0];
+      var billed = Number(o.id) === billedId ? o : (others || []).filter(function (y) { return Number(y.id) === billedId; })[0];
+      if (!open || !billed) return;
+      if (!confirm(ono(open) + ' ko ' + onoBilled(billed) + ' ka duplicate mark karke cancel karein? Pcs add nahi honge.')) return;
+      call('cancelAsDup', { open_id: open.id, billed_id: billed.id }).then(function () { toast('Duplicate mark ho gaya'); go('/o/' + billed.id); }).catch(fail);
+    };
+  });
   Array.prototype.forEach.call(document.querySelectorAll('.dupn'), function (btn) { btn.onclick = function () { if (!confirm('Ye duplicate nahi hai? Flag hamesha ke liye hat jayega.')) return; call('dismissDup', { a: o.id, b: Number(btn.dataset.id) }).then(function () { toast('Flag hata diya'); vOrder(v, o.id); }).catch(fail); }; });
-  var all = document.getElementById('dma'); if (all) all.onclick = function () { mergeDialog([o].concat(others || []), function (kept) { go('/o/' + kept); }); };
+  var all = document.getElementById('dma'); if (all) all.onclick = function () { mergeDialog([o].concat((others || []).filter(function (x) { return !isDupBilled(x) && !isDupBilled(o); })), function (kept) { go('/o/' + kept); }); };
 }
 function vDups(v) {
   call('dupList').then(function (list) {
     var groups = dupGroupList(list), days = (S.m.dup_days != null ? S.m.dup_days : 2);
-    var rule = 'Same dealer, overlapping brand / item / amount, order date ' + days + ' din ke andar, bill se pehle. Koi bhi source (Sales Tracker, warehouse, store, phone).';
+    var rule = 'Same dealer, overlapping brand / item / amount, order date ' + days + ' din ke andar. Open + open merge ho sakte hain. Ek billed + ek open: open ko Cancel as duplicate. Manual marks bhi yahin dikhte hain.';
     v.innerHTML = '<div class="row"><h2>⚠ Possible duplicates (' + groups.length + ')</h2></div><p class="small muted">' + h(rule) + '</p>' +
       (dupGroupCardsHtml(groups, isMgr()) || '<div class="card center muted">Koi possible duplicate nahi 👍</div>');
     bindDupGroupActions(v, groups, function () { vDups(v); });

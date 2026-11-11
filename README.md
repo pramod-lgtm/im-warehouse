@@ -39,9 +39,11 @@ Billing > "Download template" gives `Billing_Import_Template.xlsx`; its headers 
 ## Possible duplicates
 Admin / warehouse manager: Meri queue chip **⚠ Duplicates** (alongside Picking, Checking, Billing, HOLD; dealer search applies), Sab orders > **⚠ Duplicates**, the filter **⚠ Possible duplicates**, or the red badge on an order. The full list is also at `#/dup` (link from the Meri queue Duplicates summary), but it is not in the bottom nav.
 
-The list groups likely-duplicate open (not yet billed) orders: same dealer, overlapping brand or item or similar qty/amount, order dates within Settings `dup_days` (default 2). Any source (Sales Tracker, warehouse W-, store, phone). Set Settings `dup_st_only` to 1 to go back to only Sales Tracker vs warehouse pairs.
+The list groups likely-duplicate orders: same dealer, overlapping brand or item or similar qty/amount, order dates within Settings `dup_days` (default 2). This includes two open (not yet billed) orders, and a billed order paired with a still-open one. Two billed orders are not flagged. Any source (Sales Tracker, warehouse W-, store, phone). Set Settings `dup_st_only` to 1 to go back to only Sales Tracker vs warehouse pairs.
 
-**Merge selected** (2+ orders, only before billing): choose which order to keep. Other orders become "Merge ho gaya" (not deleted, hidden from queues, src_id kept so sync does not re-import). Default is to combine lines (same brand+item qty added, new lines inserted). You can also keep one without adding pcs. "Not duplicate" hides that group forever. Merge is only for admin / warehouse manager.
+**Merge selected** (2+ open orders, only before billing): choose which order to keep. Other orders become "Merge ho gaya" (not deleted, hidden from queues, src_id kept so sync does not re-import). Default is to combine lines. If one order is already billed, Merge is hidden; use **Cancel as duplicate of &lt;billed order&gt;** on the open one (same merged stage and audit note, no pcs added).
+
+After a dealer search in Meri queue, admin / warehouse manager can select 2+ orders and tap **Mark duplicate** to create a manual group on this tab (stored in the backend). "Not duplicate" hides an auto or manual group forever.
 
 ## Order SLA
 Every order must be billed within `sla_hours` of being received (Sales Tracker visit time, or create time for in-app orders). After `cutoff_time`, before `open_time`, and on holidays / weekly off the deadline moves as per the Settings tab. Managers can mark "Waiting for purchase - <brand>" on an order, and record "Purchase aaya" (Dashboard > 📦) to give pending orders of that brand a new deadline. Dashboard shows On time / Due soon / Delayed / Waiting for stock, delayed report and on-time % by day.
