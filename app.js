@@ -46,7 +46,7 @@ function planBadge(o) {
   if (Number(o.plan_override)) bits.push('<span class="pill src">Override</span>');
   return bits.length ? ' ' + bits.join(' ') : '';
 }
-function badges(o) { return ' <span class="pill src">' + h(srcOf(o)) + '</span>' + (o.priority === 'Urgent' ? ' <span class="pill st-hold">URGENT</span>' : '') + ((o.dups || []).length ? ' <span class="pill st-hold" title="Same dealer + brand, paas ki date">⚠ Possible duplicate</span>' : '') + planBadge(o); }
+function badges(o) { return ' <span class="pill src">' + h(srcOf(o)) + '</span>' + (o.priority === 'Urgent' ? ' <span class="pill st-hold">URGENT</span>' : '') + ((o.dups || []).length ? ' <span class="pill st-hold" title="Same dealer, overlapping items / amount, paas ki date">⚠ Possible duplicate</span>' : '') + planBadge(o); }
 function pill(o) { return '<span class="pill st-' + h(o.stage) + '">' + h(stageLbl(o.stage)) + '</span>' + (o.stage === 'new' && Number(o.needs_punch) ? ' <span class="pill st-hold">Trylo: punching baaki</span>' : '') + (Number(o.hold) ? ' <span class="pill st-hold">HOLD</span>' : ''); }
 // ---------------- SLA (bill within deadline)
 var SLA_CLS = { 'On time': 'sla-ok', 'Due soon': 'sla-soon', 'Delayed': 'sla-late', 'Waiting for stock': 'sla-wait' };
@@ -81,7 +81,7 @@ function sheet(html) { var d = document.createElement('div'); d.className = 'she
 
 // ---------------- router
 function go(p) { if (location.hash !== '#' + p) location.hash = '#' + p; else route(); }
-var NAV = [['/q', '📋', 'Meri queue', null], ['/sq', '🛍️', 'Store orders', null], ['/all', '🏬', 'Sab orders', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
+var NAV = [['/q', '📋', 'Meri queue', null], ['/sq', '🛍️', 'Store orders', null], ['/all', '🏬', 'Sab orders', 'view'], ['/dup', '⚠', 'Duplicates', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
 function nav(cur) {
   var n = $('nav'); if (!S.user) { n.classList.add('hidden'); return; }
   n.innerHTML = NAV.filter(function (x) { return !x[3] || can(x[3]); }).map(function (x) { return '<a href="#' + x[0] + '" class="' + (cur.indexOf(x[0]) === 0 ? 'on' : '') + '"><i>' + x[1] + '</i>' + x[2] + '</a>'; }).join('');
@@ -277,7 +277,7 @@ function vAll(v) {
       if (q) f = f.filter(function (o) { return (o.track_no + ' ' + ono(o) + ' ' + o.dealer_name + ' ' + o.zone + ' ' + o.area + ' ' + o.route + ' ' + o.invoice_no + ' ' + (o.plan_van || '')).toUpperCase().indexOf(q) >= 0; });
       $('lst').innerHTML = f.map(card).join('') || '<div class="card center muted">Kuch nahi</div>';
     }
-    v.innerHTML = '<div class="row"><h2>Sab orders</h2>' + syncBtn() + '<button class="sm" id="ex">CSV</button>' + (function (n) { return n ? '<a class="btn sm danger" href="#/dup">⚠ Duplicates (' + n + ')</a>' : ''; })(list.filter(function (o) { return (o.dups || []).length; }).length) + '</div><div class="row"><select id="st"><option value="">Sab stage</option>' + S.m.stages.map(function (s) { return '<option value="' + s + '"' + (st === s ? ' selected' : '') + '>' + h(stageLbl(s)) + '</option>'; }).join('') + '<option value="punch_pending"' + (st === 'punch_pending' ? ' selected' : '') + '>Trylo: punching baaki</option><option value="hold"' + (st === 'hold' ? ' selected' : '') + '>HOLD</option><option value="dup"' + (st === 'dup' ? ' selected' : '') + '>⚠ Possible duplicates</option><option value="aaj_plan"' + (st === 'aaj_plan' ? ' selected' : '') + '>Aaj plan delivery</option><option value="kal"' + (st === 'kal' ? ' selected' : '') + '>Kal plan delivery</option><option value="unmapped"' + (st === 'unmapped' ? ' selected' : '') + '>Unmapped area</option><option value="cancelled"' + (st === 'cancelled' ? ' selected' : '') + '>Cancel</option></select><select id="sf"><option value="">Sab source</option>' + ['Sales Tracker'].concat(S.m.sources || []).map(function (x) { return '<option' + (x === sf ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select></div><div class="row"><select id="pv"><option value="">Sab van</option>' + vans.map(function (x) { return '<option value="' + h(x) + '"' + (x === pv ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select><input type="date" id="pd" value="' + h(pd) + '" title="Plan delivery date"><input id="q" placeholder="Tracking / dealer / area / van"></div><div id="lst" style="margin-top:10px"></div>';
+    v.innerHTML = '<div class="row"><h2>Sab orders</h2>' + syncBtn() + '<button class="sm" id="ex">CSV</button>' + (function (n) { return '<a class="btn sm' + (n ? ' danger' : '') + '" href="#/dup">⚠ Duplicates' + (n ? ' (' + n + ')' : '') + '</a>'; })(list.filter(function (o) { return (o.dups || []).length; }).length) + '</div><div class="row"><select id="st"><option value="">Sab stage</option>' + S.m.stages.map(function (s) { return '<option value="' + s + '"' + (st === s ? ' selected' : '') + '>' + h(stageLbl(s)) + '</option>'; }).join('') + '<option value="punch_pending"' + (st === 'punch_pending' ? ' selected' : '') + '>Trylo: punching baaki</option><option value="hold"' + (st === 'hold' ? ' selected' : '') + '>HOLD</option><option value="dup"' + (st === 'dup' ? ' selected' : '') + '>⚠ Possible duplicates</option><option value="aaj_plan"' + (st === 'aaj_plan' ? ' selected' : '') + '>Aaj plan delivery</option><option value="kal"' + (st === 'kal' ? ' selected' : '') + '>Kal plan delivery</option><option value="unmapped"' + (st === 'unmapped' ? ' selected' : '') + '>Unmapped area</option><option value="cancelled"' + (st === 'cancelled' ? ' selected' : '') + '>Cancel</option></select><select id="sf"><option value="">Sab source</option>' + ['Sales Tracker'].concat(S.m.sources || []).map(function (x) { return '<option' + (x === sf ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select></div><div class="row"><select id="pv"><option value="">Sab van</option>' + vans.map(function (x) { return '<option value="' + h(x) + '"' + (x === pv ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select><input type="date" id="pd" value="' + h(pd) + '" title="Plan delivery date"><input id="q" placeholder="Tracking / dealer / area / van"></div><div id="lst" style="margin-top:10px"></div>';
     $('st').onchange = function () { st = this.value; LS.setItem('imw_f', st); draw(); }; $('sf').onchange = function () { sf = this.value; LS.setItem('imw_sf', sf); draw(); };
     $('pv').onchange = function () { pv = this.value; LS.setItem('imw_pv', pv); draw(); }; $('pd').onchange = function () { pd = this.value; LS.setItem('imw_pd', pd); draw(); };
     $('q').oninput = draw; draw(); bindSync(function () { vAll(v); });
@@ -285,38 +285,89 @@ function vAll(v) {
   }).catch(fail);
 }
 
-// ---------------- possible duplicates (salesman + warehouse entered the same order)
-function dupLine(o) { return (o.lines || []).map(function (l) { return h(l.brand) + ' ' + pcs(l.ordered_qty); }).join(' + ') + ' = <b>' + pcs(o.pcs) + '</b> pcs'; }
+// ---------------- possible duplicates (same dealer, overlapping items/amount, close dates, not yet billed)
+function dupLine(o) { return (o.lines || []).map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ' ' + pcs(l.ordered_qty); }).join(' + ') + ' = <b>' + pcs(o.pcs) + '</b> pcs'; }
+function dupPicked(o) { var st = (S.m && S.m.stages) || []; return !!(o && (o.picked_at || (st.indexOf(o.stage) >= 0 && st.indexOf('picked') >= 0 && st.indexOf(o.stage) >= st.indexOf('picked')))); }
+function dupGroupList(list) {
+  var parent = {}, by = {};
+  function find(x) { x = String(x); if (!parent[x] || parent[x] === x) return parent[x] = x; return parent[x] = find(parent[x]); }
+  function uni(a, b) { a = find(a); b = find(b); if (a !== b) parent[a] = b; }
+  (list || []).forEach(function (p) { if (!p || !p.a || !p.b) return; by[p.a.id] = p.a; by[p.b.id] = p.b; uni(p.a.id, p.b.id); });
+  var groups = {};
+  Object.keys(by).forEach(function (k) {
+    var r = find(k); if (!groups[r]) groups[r] = { orders: [], pairs: [], brands: {}, items: {}, days: 0 };
+    groups[r].orders.push(by[k]);
+  });
+  (list || []).forEach(function (p) {
+    if (!p || !p.a) return; var g = groups[find(p.a.id)]; if (!g) return;
+    g.pairs.push(p); (p.brands || []).forEach(function (b) { g.brands[b] = 1; }); (p.items || []).forEach(function (b) { g.items[b] = 1; }); if (p.days > g.days) g.days = p.days;
+  });
+  return Object.keys(groups).map(function (k) {
+    var g = groups[k];
+    g.orders.sort(function (a, b) { return String(a.order_date) < String(b.order_date) ? -1 : String(a.order_date) > String(b.order_date) ? 1 : Number(a.id) - Number(b.id); });
+    return g;
+  });
+}
 function dupCard(o, others) {
   if (!others || !others.length || !isMgr()) return '';
-  return '<div class="card" style="border:2px solid #c0392b"><h3>⚠ Possible duplicate (' + others.length + ')</h3><p class="small muted">Same dealer + same brand, paas ki date. Salesman aur warehouse dono ne order daala ho sakta hai.</p>' +
-    others.map(function (x) { return '<div class="chk"><a href="#/o/' + x.id + '">' + trk(x) + h(ono(x)) + '</a><span class="small">' + h(srcOf(x)) + ' • ' + h(dmy(x.order_date)) + ' • ' + dupLine(x) + ' • ' + h(stageLbl(x.stage)) + '</span><button class="sm primary dupm" data-id="' + x.id + '">Merge</button><button class="sm dupn" data-id="' + x.id + '">Not duplicate</button></div>'; }).join('') + '</div>';
+  return '<div class="card" style="border:2px solid #c0392b"><h3>⚠ Possible duplicate (' + others.length + ')</h3><p class="small muted">Same dealer, overlapping items / amount, paas ki date. Bill se pehle merge kar sakte ho.</p>' +
+    others.map(function (x) { return '<div class="chk"><a href="#/o/' + x.id + '">' + trk(x) + h(ono(x)) + '</a><span class="small">' + h(srcOf(x)) + ' • ' + h(dmy(x.order_date)) + ' • ' + dupLine(x) + ' • ' + h(stageLbl(x.stage)) + '</span><button class="sm primary dupm" data-id="' + x.id + '">Merge</button><button class="sm dupn" data-id="' + x.id + '">Not duplicate</button></div>'; }).join('') +
+    (others.length > 1 ? '<div class="row"><button class="sm primary" id="dma">Merge selected (2+)</button></div>' : '') + '</div>';
 }
-function dupSide(x, name) {
-  return '<div class="card"><label><input type="radio" name="dk" value="' + x.id + '"> <b>Ye rakhein</b></label><div><b>' + trk(x) + h(ono(x)) + '</b></div><div class="small">' + h(srcOf(x)) + (x.salesman ? ' • salesman ' + h(x.salesman) : '') + (x.taken_by ? ' • liya ' + h(x.taken_by) : '') + '</div><div class="small">' + h(dmy(x.order_date)) + ' ' + tm(x.src_at || x.created_at) + '</div><div class="small">' + dupLine(x) + '</div><div class="small">' + h(stageLbl(x.stage)) + (Number(x.hold) ? ' • HOLD' : '') + '</div>' + (x.remarks ? '<div class="small muted">Remark: ' + h(x.remarks) + '</div>' : '') + '</div>';
+function dupSide(x) {
+  return '<div class="card"><label><input type="radio" name="dk" value="' + x.id + '"> <b>Ye rakhein</b></label><div><b>' + trk(x) + h(ono(x)) + '</b></div><div class="small">' + h(srcOf(x)) + (x.salesman ? ' • salesman ' + h(x.salesman) : '') + (x.taken_by ? ' • liya ' + h(x.taken_by) : '') + '</div><div class="small">' + h(dmy(x.order_date)) + ' ' + tm(x.src_at || x.created_at) + '</div><div class="small">' + dupLine(x) + '</div><div class="small">' + h(stageLbl(x.stage)) + (Number(x.hold) ? ' • HOLD' : '') + (dupPicked(x) ? ' • pick ho chuka' : '') + '</div>' + (x.remarks ? '<div class="small muted">Remark: ' + h(x.remarks) + '</div>' : '') + '</div>';
 }
 function mergeDialog(a, b, done) {
-  sheet('<h3>Duplicate merge</h3><p class="small muted">' + h(a.dealer_name) + '. Jo order rakhna hai use chunein. Doosra "Merge ho gaya" ho jayega (delete nahi hota, queue se hat jata hai).</p><div class="grid2">' + dupSide(a) + dupSide(b) + '</div>' +
-    '<label><input type="radio" name="dmode" value="keep" checked> Sirf ek rakhein (pcs nahi jodne)</label><label><input type="radio" name="dmode" value="add"> Pcs add karein (doosre order ke pcs brand-wise jod do)</label>' +
+  var orders, cb;
+  if (Object.prototype.toString.call(a) === '[object Array]') { orders = a; cb = b; } else { orders = [a, b]; cb = done; }
+  orders = (orders || []).filter(Boolean);
+  if (orders.length < 2) return toast('Kam se kam 2 orders chunein', 'err');
+  sheet('<h3>Duplicate merge</h3><p class="small muted">' + h(orders[0].dealer_name) + '. Jo order rakhna hai use chunein. Baaki "Merge ho gaya" ho jayenge (delete nahi hota, queue se hat jaate hain). Default: lines / pcs jod diye jaate hain.</p><div' + (orders.length === 2 ? ' class="grid2"' : '') + '>' + orders.map(dupSide).join('') + '</div>' +
+    '<label><input type="radio" name="dmode" value="add" checked> Lines / pcs jod do (same brand+item add, nayi lines alag)</label><label><input type="radio" name="dmode" value="keep"> Sirf ek rakhein (pcs nahi jodne)</label>' +
     '<button class="primary big" id="dms" style="margin-top:10px">Merge karein</button>');
-  var def = /^W-/.test(a.src_id) ? b.id : a.id; var r0 = document.querySelector('input[name=dk][value="' + def + '"]'); if (r0) r0.checked = true; // default keep the Sales Tracker order
+  var def = orders.filter(function (o) { return !/^W-/.test(String(o.src_id || '')) && !dupPicked(o); })[0] || orders.filter(function (o) { return !dupPicked(o); })[0] || orders[0];
+  var r0 = document.querySelector('input[name=dk][value="' + def.id + '"]'); if (r0) r0.checked = true;
   $('dms').onclick = function () {
     var k = document.querySelector('input[name=dk]:checked'); if (!k) return toast('Kaunsa rakhna hai chunein', 'err');
-    var keep = Number(k.value), drop = keep === Number(a.id) ? b.id : a.id, add = document.querySelector('input[name=dmode]:checked').value === 'add';
-    if (!confirm('Order ' + ono(keep === Number(a.id) ? b : a) + ' merge (hide) karein?')) return;
-    call('mergeOrders', { keep_id: keep, drop_id: drop, add_pcs: add ? 1 : 0 }).then(function (x) { toast('Merge ho gaya ✔'); var sh = document.querySelector('.sheet'); if (sh) sh.remove(); done(x.kept); }).catch(fail);
+    var keep = Number(k.value), keepO = orders.filter(function (o) { return Number(o.id) === keep; })[0];
+    var drops = orders.filter(function (o) { return Number(o.id) !== keep; });
+    var add = document.querySelector('input[name=dmode]:checked').value === 'add';
+    if (add && dupPicked(keepO)) return toast('Pick ho chuke order mein pcs add nahi ho sakte. Pick se pehle wala rakhein, ya pcs add band karein.', 'err');
+    if (!confirm(drops.map(ono).join(', ') + ' ko ' + ono(keepO) + ' mein merge (hide) karein?')) return;
+    call('mergeOrders', { keep_id: keep, drop_ids: drops.map(function (o) { return o.id; }), add_pcs: add ? 1 : 0 }).then(function (x) { toast('Merge ho gaya ✔'); var sh = document.querySelector('.sheet'); if (sh) sh.remove(); if (cb) cb(x.kept); }).catch(fail);
   };
 }
 function bindDup(v, o, others) {
-  Array.prototype.forEach.call(document.querySelectorAll('.dupm'), function (btn) { btn.onclick = function () { var x = (others || []).filter(function (y) { return Number(y.id) === Number(btn.dataset.id); })[0]; if (x) mergeDialog(o, x, function (kept) { go('/o/' + kept); }); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('.dupm'), function (btn) { btn.onclick = function () { var x = (others || []).filter(function (y) { return Number(y.id) === Number(btn.dataset.id); })[0]; if (x) mergeDialog([o, x], function (kept) { go('/o/' + kept); }); }; });
   Array.prototype.forEach.call(document.querySelectorAll('.dupn'), function (btn) { btn.onclick = function () { if (!confirm('Ye duplicate nahi hai? Flag hamesha ke liye hat jayega.')) return; call('dismissDup', { a: o.id, b: Number(btn.dataset.id) }).then(function () { toast('Flag hata diya'); vOrder(v, o.id); }).catch(fail); }; });
+  var all = document.getElementById('dma'); if (all) all.onclick = function () { mergeDialog([o].concat(others || []), function (kept) { go('/o/' + kept); }); };
 }
 function vDups(v) {
   call('dupList').then(function (list) {
-    v.innerHTML = '<div class="row"><h2>⚠ Possible duplicates (' + list.length + ')</h2></div><p class="small muted">Same dealer + same brand, order date ' + h((S.m.dup_days != null ? S.m.dup_days : 2)) + ' din ke andar, ek Sales Tracker aur ek warehouse (W-) order. Bill se pehle wale orders hi.</p>' +
-      (list.map(function (p, i) { return '<div class="card"><div><b>' + h(p.a.dealer_name) + '</b> <span class="small muted">' + h(p.brands.join(', ')) + ' • ' + p.days + ' din ka fark</span></div><div class="grid2"><div class="small"><a href="#/o/' + p.a.id + '">' + trk(p.a) + h(ono(p.a)) + '</a> ' + h(srcOf(p.a)) + '<br>' + h(dmy(p.a.order_date)) + ' • ' + dupLine(p.a) + '</div><div class="small"><a href="#/o/' + p.b.id + '">' + trk(p.b) + h(ono(p.b)) + '</a> ' + h(srcOf(p.b)) + '<br>' + h(dmy(p.b.order_date)) + ' • ' + dupLine(p.b) + '</div></div><div class="row"><button class="sm primary" data-m="' + i + '">Merge</button><button class="sm" data-n="' + i + '">Not duplicate</button></div></div>'; }).join('') || '<div class="card center muted">Koi possible duplicate nahi 👍</div>');
-    Array.prototype.forEach.call(v.querySelectorAll('[data-m]'), function (b) { b.onclick = function () { var p = list[b.dataset.m]; mergeDialog(p.a, p.b, function () { vDups(v); }); }; });
-    Array.prototype.forEach.call(v.querySelectorAll('[data-n]'), function (b) { b.onclick = function () { var p = list[b.dataset.n]; if (!confirm('Ye duplicate nahi hai?')) return; call('dismissDup', { a: p.a.id, b: p.b.id }).then(function () { toast('Flag hata diya'); vDups(v); }).catch(fail); }; });
+    var groups = dupGroupList(list), days = (S.m.dup_days != null ? S.m.dup_days : 2);
+    var rule = 'Same dealer, overlapping brand / item / amount, order date ' + days + ' din ke andar, bill se pehle. Koi bhi source (Sales Tracker, warehouse, store, phone).';
+    v.innerHTML = '<div class="row"><h2>⚠ Possible duplicates (' + groups.length + ')</h2></div><p class="small muted">' + h(rule) + '</p>' +
+      (groups.map(function (g, i) {
+        var name = (g.orders[0] && g.orders[0].dealer_name) || '', meta = Object.keys(g.brands).concat(Object.keys(g.items));
+        if (g.days) meta = meta.concat([g.days + ' din ka fark']);
+        return '<div class="card" data-g="' + i + '"><div><b>' + h(name) + '</b> <span class="small muted">' + h(meta.join(' • ')) + ' • ' + g.orders.length + ' orders</span></div>' +
+          g.orders.map(function (o) { return '<label class="chk"><input type="checkbox" class="dsel" data-id="' + o.id + '" checked> <a href="#/o/' + o.id + '">' + trk(o) + h(ono(o)) + '</a><span class="small">' + h(srcOf(o)) + ' • ' + h(dmy(o.order_date)) + ' • ' + dupLine(o) + ' • ' + h(stageLbl(o.stage)) + '</span></label>'; }).join('') +
+          (isMgr() ? '<div class="row"><button class="sm primary" data-m="' + i + '">Merge selected</button><button class="sm" data-n="' + i + '">Not duplicate</button></div>' : '') + '</div>';
+      }).join('') || '<div class="card center muted">Koi possible duplicate nahi 👍</div>');
+    Array.prototype.forEach.call(v.querySelectorAll('[data-m]'), function (b) {
+      b.onclick = function () {
+        var g = groups[b.dataset.m], ids = Array.prototype.map.call(v.querySelectorAll('.card[data-g="' + b.dataset.m + '"] .dsel:checked'), function (x) { return Number(x.dataset.id); });
+        var selected = g.orders.filter(function (o) { return ids.indexOf(Number(o.id)) >= 0; });
+        if (selected.length < 2) return toast('Kam se kam 2 orders chunein', 'err');
+        mergeDialog(selected, function () { vDups(v); });
+      };
+    });
+    Array.prototype.forEach.call(v.querySelectorAll('[data-n]'), function (b) {
+      b.onclick = function () {
+        var g = groups[b.dataset.n]; if (!confirm('In sab ko duplicate nahi maane? Flag hamesha ke liye hat jayega.')) return;
+        Promise.all(g.pairs.map(function (p) { return call('dismissDup', { a: p.a.id, b: p.b.id }); })).then(function () { toast('Flag hata diya'); vDups(v); }).catch(fail);
+      };
+    });
   }).catch(fail);
 }
 

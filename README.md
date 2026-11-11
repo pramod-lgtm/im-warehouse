@@ -2,7 +2,7 @@
 
 Order tracker for the Intimissi / Karwa warehouse, Delhi: orders from the Sales Tracker, then allocate to picker, pick (with short qty), check, bill, pack, delivery allocation, dispatch.
 
-App: https://pramod-lgtm.github.io/im-sales/warehouse/
+App: https://pramod-lgtm.github.io/im-warehouse/
 Backend: Google Apps Script Web app (Code.gs kept outside this repo, see SETUP.md given with it).
 
 ## Demo logins (change the PINs in Admin after first login)
@@ -35,6 +35,13 @@ Billing > "Download template" gives `Billing_Import_Template.xlsx`; its headers 
 
 ## Manual orders (phone / WhatsApp / walk-in / email / salesman)
 "+ New order" (admin, manager, dispatch): pick a dealer or add a new one, source, taken by, salesman, brand lines (brand, item, qty, value), remarks, expected dispatch date, priority. Manual orders are numbered W-1, W-2... (Sales Tracker orders show as ST-<id>), follow the same stages, hold and bill matching, and can be edited or cancelled (with reason) until billed. Source shows as a badge, a filter in All orders, on the dashboard and in the CSV.
+
+## Possible duplicates
+Admin / warehouse manager: bottom nav **Duplicates**, or Sab orders > **⚠ Duplicates**, or the filter **⚠ Possible duplicates**, or the red badge on an order.
+
+The list groups likely-duplicate open (not yet billed) orders: same dealer, overlapping brand or item or similar qty/amount, order dates within Settings `dup_days` (default 2). Any source (Sales Tracker, warehouse W-, store, phone). Set Settings `dup_st_only` to 1 to go back to only Sales Tracker vs warehouse pairs.
+
+**Merge selected** (2+ orders, only before billing): choose which order to keep. Other orders become "Merge ho gaya" (not deleted, hidden from queues, src_id kept so sync does not re-import). Default is to combine lines (same brand+item qty added, new lines inserted). You can also keep one without adding pcs. "Not duplicate" hides that group forever. Merge is only for admin / warehouse manager.
 
 ## Order SLA
 Every order must be billed within `sla_hours` of being received (Sales Tracker visit time, or create time for in-app orders). After `cutoff_time`, before `open_time`, and on holidays / weekly off the deadline moves as per the Settings tab. Managers can mark "Waiting for purchase - <brand>" on an order, and record "Purchase aaya" (Dashboard > 📦) to give pending orders of that brand a new deadline. Dashboard shows On time / Due soon / Delayed / Waiting for stock, delayed report and on-time % by day.
