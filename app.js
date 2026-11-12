@@ -116,8 +116,9 @@ function vHoldList(v) {
     var hl = rs[0], open = rs[1].filter(function (o) { return o.stage !== 'cancelled' && o.stage !== 'dispatched' && !o.invoice_no && S.m.stages.indexOf(o.stage) < S.m.stages.indexOf('billed'); }), match = [];
     var mg = hl.merge || {}, mergeAt = mg.at ? ftm(mg.at) : 'abhi pull nahi hua';
     v.innerHTML = '<div class="row"><h2>Hold dealers list</h2><button class="sm good" id="hx" style="flex:0;white-space:nowrap">⬇️ HOLD orders Excel</button></div><p class="small muted">Is list ke dealers ke naye orders apne aap HOLD ho jaate hain, jab tak agli list import na ho. List date: <b>' + h(hl.list_date || '-') + '</b> • ' + hl.entries.length + ' dealers' +
-      ' • Hold import ke liye Sales Tracker merged list: <b>' + h(mergeAt) + '</b> <button type="button" class="sm" id="hmr">Refresh merged list</button></p>' +
+      ' • Merge groups (Sales Tracker): <b>' + h(mergeAt) + '</b> <button type="button" class="sm" id="hmr">Refresh merge groups</button>' + (mg.multi ? ' • <span class="short">' + mg.multi + ' dealers ke doosre naam hain</span>' : '') + '</p>' +
       '<div class="card">' + (hl.entries.length ? table(hl.entries, [['dealer_name', 'Dealer', function (x, r) { return holdDealerCell(r); }], ['why', 'Reason'], ['brand', 'Brand'], ['os', 'OS', inr], ['created_by', 'Kisne'], ['id', '', function (x) { return '<button class="sm good" data-ud="' + x + '">Dealer UNHOLD</button> <button class="sm warn" data-rm="' + x + '">Hatao</button>'; }]]) : '<span class="muted">List khali hai.</span>') + '</div>' +
+      holdGroupReviewHtml(hl.entries, open) +
       '<details class="card"><summary><b>+ Ek dealer jodein</b></summary><datalist id="dl_hd">' + hl.dealers.map(function (d) { return '<option value="' + h(d.name) + '">'; }).join('') + '</datalist><label>Dealer</label><input id="ad" list="dl_hd" placeholder="Naam search karein"><div class="grid2"><div><label>Reason</label><input id="aw" placeholder="CHEQUE BOUNCE / >100d"></div><div><label>Brand</label><input id="ab" placeholder="TRYLO / C9 / BOTH"></div></div><label>OS (Rs)</label><input id="ao" inputmode="numeric"><button class="primary" id="aa" style="margin-top:8px">Jodein + open orders hold karein</button></details>' +
       '<details class="card"><summary><b>Nayi list import (purani list replace hogi)</b></summary><p class="small muted">Excel se paste karein: Dealer | Reason | Brand | OS (har line ek dealer).</p><label>List date</label><input id="ld" placeholder="24-Oct" value="' + h(hl.list_date) + '"><textarea id="lp" rows="6" style="width:100%"></textarea><button id="lm" style="margin-top:6px">Match karein</button><div id="lr"></div></details>' +
       '<div class="card"><h3>Open orders – select karke hold / unhold</h3><input id="oq" placeholder="Dealer / tracking no"><div class="row" style="margin-top:6px"><select id="br">' + S.m.hold_reasons.map(function (x) { return '<option>' + h(x) + '</option>'; }).join('') + '</select><input id="bn" placeholder="Note"></div><div class="row" style="margin-top:6px"><input id="udn" list="dl_hd" placeholder="Dealer naam (list ke bahar wala bhi)"><button class="good" id="udb" style="flex:0;white-space:nowrap">Dealer ke sab orders UNHOLD</button></div><div class="row" style="margin-top:6px"><button class="danger" id="bh">Selected HOLD karein</button><button class="warn" id="bu">Selected UNHOLD karein</button></div><label class="chk"><input type="checkbox" id="oall"> Sab dikh rahe select karein</label><div id="ol"></div></div>';
@@ -128,11 +129,21 @@ function vHoldList(v) {
     drawOrders(); $('oq').oninput = drawOrders;
     $('hx').onclick = function () { holdExcel(rs[1], hl); };
     if ($('hmr')) $('hmr').onclick = function () {
-      call('refreshMergedDealers').then(function (r) { toast('Merged list refresh: ' + (r.merge_groups || 0) + ' groups, ' + (r.pulled || 0) + ' dealers'); vHoldList(v); }).catch(function (e) {
+      call('refreshMergedDealers').then(function (r) { toast('Merge groups refresh: ' + (r.merge_groups || 0) + ' groups, ' + (r.pulled || 0) + ' dealers'); vHoldList(v); }).catch(function (e) {
         if (/Unknown action/i.test(String(e && e.message || e))) toast('Server update baaki hai — pehle naya Code.gs deploy karein', 'err');
         else fail(e);
       });
     };
+    Array.prototype.forEach.call(v.querySelectorAll('[data-holdtoo]'), function (b) {
+      b.onclick = function () {
+        var id = Number(b.getAttribute('data-holdtoo')), name = b.getAttribute('data-name') || '', os = b.getAttribute('data-os') || '';
+        var card = b.closest('.card');
+        var why = (card && card.getAttribute('data-group-why')) || 'Overdue';
+        if (!id) return toast('Is naam ka warehouse dealer nahi mila', 'err');
+        if (!confirm(name + ' ko hold list mein jodein? Iske open orders tab HOLD honge. (Doosra naam automatic hold nahi hota — aap decide kar rahe ho.)')) return;
+        call('saveHoldDealer', { dealer_id: id, why: why, os: os }).then(function (r) { toast(name + ' joda • ' + (r.count || 0) + ' orders hold'); vHoldList(v); }).catch(fail);
+      };
+    });
 
     $('oall').onchange = function () { var c = this.checked; Array.prototype.forEach.call(document.querySelectorAll('[data-o]'), function (x) { x.checked = c; }); };
     function sel() { return Array.prototype.filter.call(document.querySelectorAll('[data-o]'), function (x) { return x.checked; }).map(function (x) { return Number(x.getAttribute('data-o')); }); }
@@ -146,7 +157,7 @@ function vHoldList(v) {
       var rows = parseHoldPaste(val('lp')); if (!rows.length) return toast('Kuch paste nahi kiya', 'err');
       call('holdMatch', { rows: rows }).then(function (m) {
         match = m; var bad = { sure: '', maybe: ' <span class="pill st-hold">pakka nahi</span>', none: ' <span class="pill st-hold">unmatched</span>' };
-        $('lr').innerHTML = m.map(function (x, i) { return '<label class="chk"><input type="checkbox" data-m="' + i + '"' + (x.status === 'sure' ? ' checked' : '') + (x.status === 'none' ? ' disabled' : '') + '> ' + h(x.dealer) + ' → <b>' + h(x.master_name || '-') + '</b> <span class="small muted">' + x.score + '% • ' + h(x.why) + ' • ' + h(x.brand) + ' • OS ' + h(x.os) + '</span>' + bad[x.status] + '</label>'; }).join('') +
+        $('lr').innerHTML = m.map(function (x, i) { return '<label class="chk"><input type="checkbox" data-m="' + i + '"' + (x.status === 'sure' ? ' checked' : '') + (x.status === 'none' ? ' disabled' : '') + '> ' + h(x.dealer) + ' → <b>' + h(x.master_name || '-') + '</b> <span class="small muted">' + x.score + '% • ' + h(x.why) + ' • ' + h(x.brand) + ' • OS ' + h(x.os) + '</span>' + bad[x.status] + holdGroupFlag(x.hold_group) + '</label>'; }).join('') +
           '<p class="small muted">' + m.filter(function (x) { return x.status === 'sure'; }).length + ' pakke match. "Pakka nahi" wale khud check karke tick karein.</p><button class="primary big" id="ls">List save + orders HOLD karein</button>';
         $('ls').onclick = function () {
           var pick = Array.prototype.filter.call(document.querySelectorAll('[data-m]'), function (x) { return x.checked; }).map(function (x) { return match[Number(x.getAttribute('data-m'))]; });
@@ -165,26 +176,52 @@ function ftm(iso) { var t = Date.parse(iso); if (!isFinite(t)) return ''; var d 
 function days(from) { var t = Date.parse(from); return isFinite(t) ? Math.max(0, Math.floor((Date.now() - t) / 86400000)) : ''; }
 function holdType(o) { return /^Hold list/i.test(o.hold_by || '') ? 'HOLD list' + (o.hold_reason === 'Cheque bounce' ? ' (Cheque bounce)' : '') : (o.hold_reason === 'Cheque bounce' ? 'Cheque bounce' : 'Manual'); }
 function holdDealerCell(e) {
-  var name = e.dealer_name || e.merged_name || '';
+  var name = e.dealer_name || '';
   var raw = e.list_name || e.raw_name || '';
   var sub = (raw && name && raw.toUpperCase() !== name.toUpperCase()) ? '<div class="small muted">List mein: ' + h(raw) + '</div>' : '';
-  return '<b>' + h(name || raw || '-') + '</b>' + sub;
+  return '<b>' + h(name || raw || '-') + '</b>' + holdGroupFlag(e.hold_group) + sub;
+}
+function holdGroupFlag(g) {
+  if (!g || !g.names || g.names.length < 2) return '';
+  var gap = (g.missing_os && g.missing_os.length) ? ' <span class="small muted">(kuch naam ka OS nahi mila)</span>' : '';
+  return '<div class="small short">Doosra naam bhi hai: combined OS ' + inr(g.combined_os) + gap + '</div>';
+}
+function osSourceLbl(src) { return src === 'list' ? 'list OS' : src === 'overdue' ? 'overdue' : src === 'net_os' ? 'net OS' : 'OS nahi'; }
+function holdGroupReviewHtml(entries, open) {
+  var seen = {}, cards = [];
+  (entries || []).forEach(function (e) {
+    var g = e.hold_group; if (!g || !g.names || g.names.length < 2 || seen[String(g.src_id || g.master_name)]) return;
+    seen[String(g.src_id || g.master_name)] = 1;
+    var held = {};
+    (open || []).forEach(function (o) { if (Number(o.hold)) held[String(o.dealer_src_id || '')] = (held[String(o.dealer_src_id || '')] || 0) + 1; if (Number(o.hold)) held['n:' + String(o.dealer_name || '').toUpperCase()] = 1; });
+    var rows = g.names.map(function (n) {
+      var ordersHeld = held[String(n.src_id || '')] || held['n:' + String(n.name || '').toUpperCase()];
+      var status = n.on_list ? '<span class="pill st-hold">List par</span>' : '<span class="pill">List par nahi</span>';
+      if (ordersHeld) status += ' <span class="pill st-hold">Orders HOLD</span>';
+      var os = n.os_source ? (inr(n.os_value) + ' <span class="muted">(' + osSourceLbl(n.os_source) + ')</span>') : '<span class="muted">OS nahi mila</span>';
+      if (!n.on_list && n.os_source !== 'list') os += ' <span class="small muted">— pasted list mein yeh naam nahi</span>';
+      var btn = '';
+      if (!n.on_list && n.dealer_id) btn = ' <button type="button" class="sm primary" data-holdtoo="' + n.dealer_id + '" data-name="' + h(n.name) + '" data-os="' + (n.os_value != null && n.os_source !== 'list' ? n.os_value : '') + '">Hold this too</button>';
+      else if (!n.on_list && !n.dealer_id) btn = ' <span class="small muted">warehouse mein dealer nahi mila</span>';
+      return '<div style="margin:6px 0"><b>' + h(n.name) + '</b> ' + status + '<div class="small">Individual OS: ' + os + btn + '</div></div>';
+    }).join('');
+    var gap = (g.missing_os && g.missing_os.length) ? '<div class="small muted">OS nahi mila: ' + h(g.missing_os.join(', ')) + '</div>' : '';
+    cards.push('<div class="card" data-group-why="' + h(e.why || e.reason || 'Overdue') + '"><h3>Doosra naam bhi hai: ' + h(g.master_name) + '</h3><p class="small"><b>Combined OS ' + inr(g.combined_os) + '</b> — review karke doosre naam ko manually hold karein. Automatic hold nahi hota.</p>' + rows + gap + '</div>');
+  });
+  if (!cards.length) return '';
+  return '<div><h3>Doosre naam — combined outstanding</h3>' + cards.join('') + '</div>';
 }
 function holdRows(orders, hl) {
   var bySrc = {}, byName = {}, dl = {};
-  function addNames(e, s) { if (s) byName[String(s).toUpperCase()] = e; }
   (hl.entries || []).forEach(function (e) {
     if (e.dealer_src_id !== '' && e.dealer_src_id != null) bySrc[String(e.dealer_src_id)] = e;
-    if (e.merged_src_id) bySrc[String(e.merged_src_id)] = e;
-    String(e.merge_member_ids || '').split('|').forEach(function (id) { if (id) bySrc[String(id)] = e; });
-    addNames(e, e.dealer_name); addNames(e, e.raw_name); addNames(e, e.list_name); addNames(e, e.merged_name);
-    String(e.merge_members || '').split('|').forEach(function (nm) { addNames(e, nm.trim()); });
-    String(e.merge_aliases || '').split('|').forEach(function (nm) { addNames(e, nm.trim()); });
+    if (e.dealer_name) byName[String(e.dealer_name).toUpperCase()] = e;
   });
   (hl.dealers || []).forEach(function (d) { if (d.src_id != null) dl[String(d.src_id)] = d; });
   return orders.filter(function (o) { return Number(o.hold) && o.stage !== 'cancelled' && o.stage !== 'dispatched'; }).map(function (o) {
-    var e = bySrc[String(o.dealer_src_id)] || byName[String(o.dealer_name).toUpperCase()] || {}, d = dl[String(o.dealer_src_id)] || dl[String(e.merged_src_id || '')] || {}, rec = (o.sla && o.sla.received_at) || o.src_at || o.created_at;
-    return { 'Dealer': e.merged_name || o.dealer_name, 'List name': (e.raw_name || e.list_name || '') && (e.raw_name || e.list_name) !== (e.merged_name || o.dealer_name) ? (e.raw_name || e.list_name) : '', 'Match': e.merge_status === 'unmatched' ? 'unmatched' : (e.merge_status || ''), 'Tracking no': o.track_no || '', 'Order no': ono(o), 'Order date': dmy(o.order_date), 'Order aaya (time)': rec ? ftm(rec) : '', 'Brand': (o.lines || []).map(function (l) { return l.brand; }).filter(function (b, i, a) { return b && a.indexOf(b) === i; }).join(', '),
+    var e = bySrc[String(o.dealer_src_id)] || byName[String(o.dealer_name).toUpperCase()] || {}, d = dl[String(o.dealer_src_id)] || {}, rec = (o.sla && o.sla.received_at) || o.src_at || o.created_at;
+    var listName = e.list_name || e.raw_name || '';
+    return { 'Dealer': e.dealer_name || o.dealer_name, 'List name': listName && listName !== (e.dealer_name || o.dealer_name) ? listName : '', 'Tracking no': o.track_no || '', 'Order no': ono(o), 'Order date': dmy(o.order_date), 'Order aaya (time)': rec ? ftm(rec) : '', 'Brand': (o.lines || []).map(function (l) { return l.brand; }).filter(function (b, i, a) { return b && a.indexOf(b) === i; }).join(', '),
       'Pcs': Number(o.pcs) || 0, 'Stage': stageLbl(o.stage), 'Hold reason': o.hold_reason || '', 'Hold type': holdType(o), 'Held by': o.hold_by || '', 'Held on': ftm(o.hold_at), 'Note': o.hold_note || '',
       'List reason': e.why || '', 'Dealer OS (Rs)': e.os === '' || e.os == null ? '' : Number(e.os), 'Overdue (Rs)': d.overdue === '' || d.overdue == null ? '' : Number(d.overdue), 'Order age (din)': o.order_date ? days(o.order_date + 'T00:00:00+05:30') : '', 'Hold age (din)': days(o.hold_at), 'Zone': o.zone || '', 'Area': o.area || '', 'Salesman': o.salesman || '' };
   }).sort(function (a, b) { return a.Dealer < b.Dealer ? -1 : a.Dealer > b.Dealer ? 1 : 0; });

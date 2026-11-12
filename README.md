@@ -31,9 +31,13 @@ At allocation the manager assigns picker, checker, biller and packer. At every s
 Dealers tab (admin, manager): search, filter by zone/area, edit zone/area/route/mobile/lat/lng, bulk-set zone, CSV download/upload (id, name, area, zone, route). Area/zone can also be changed from an order. Local edits are never overwritten by the Sales Tracker sync. Cluster view and nearby orders group by zone, then area, then route.
 
 ## Hold list
-Office coordinator / manager: bottom nav **Hold list**. Paste a collection list (Dealer | Reason | Brand | OS). During **import only**, pasted names are mapped through the Sales Tracker **merged dealer list** (canonical master, aliases, and merged-away old names) to a warehouse dealer. The saved list shows the warehouse dealer name, and the original pasted name as "List mein: …" when it differs. Import preview still flags unmatched rows (nahi mila).
+Office coordinator / manager: bottom nav **Hold list**. Paste a collection list (Dealer | Reason | Brand | OS). Import matches each pasted name to a warehouse dealer by name (aliases are not used).
 
-The merged list is pulled read-only from the Sales Tracker Dealers tab and cached in a **hold-only** tab (`HoldMergeCache`), never written onto warehouse Dealers. Refresh it with **Refresh merged list**. The 15-minute Sales Tracker sync is unchanged. Auto-hold / unhold use only the dealer saved on the list, not aliases or merged-away names.
+When Sales Tracker has **merged two or more names** for the same dealer (billing / store under two names), the Hold list shows a review flag: **Doosra naam bhi hai: combined OS …**. For that group you see each name's individual outstanding, the combined outstanding, and which names are already on the hold list. The other name is **not** auto-held. Use **Hold this too** only if you decide to add it.
+
+Outstanding figures come from, in order: the pasted list OS, then the warehouse / Sales Tracker overdue, then net OS. If the other name was not on the pasted list, its list OS is missing and overdue is used when available (the gap is shown).
+
+Merge groups are pulled read-only from the Sales Tracker Dealers `merged_into` field and the Merges tab, cached in **HoldMergeCache** (hold-list scope only). Refresh with **Refresh merge groups**. The 15-minute warehouse Dealers sync and auto-hold stay as they were in v27.
 
 ## Billing template
 
