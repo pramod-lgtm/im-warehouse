@@ -31,9 +31,9 @@ At allocation the manager assigns picker, checker, biller and packer. At every s
 Dealers tab (admin, manager): search, filter by zone/area, edit zone/area/route/mobile/lat/lng, bulk-set zone, CSV download/upload (id, name, area, zone, route). Area/zone can also be changed from an order. Local edits are never overwritten by the Sales Tracker sync. Cluster view and nearby orders group by zone, then area, then route.
 
 ## Hold list
-Office coordinator / manager: bottom nav **Hold list**. Paste a collection list (Dealer | Reason | Brand | OS); names are matched to the Sales Tracker **merged dealer list** (canonical master name, plus aliases and merged-away old names). The table shows the merged name first, the original list name as "List mein: …" when it differs, and a red **unmatched** flag when no master is found.
+Office coordinator / manager: bottom nav **Hold list**. Paste a collection list (Dealer | Reason | Brand | OS). During **import only**, pasted names are mapped through the Sales Tracker **merged dealer list** (canonical master, aliases, and merged-away old names) to a warehouse dealer. The saved list shows the warehouse dealer name, and the original pasted name as "List mein: …" when it differs. Import preview still flags unmatched rows (nahi mila).
 
-The merged list is pulled read-only from the Sales Tracker Dealers tab (the same sheet already used for order sync). It is cached on warehouse Dealers (`aliases`, `merged_into`) and refreshed automatically on the 15-minute sync, or immediately with **Refresh merged list**. Auto-hold of open orders also covers orders still booked under an old / merged-away name.
+The merged list is pulled read-only from the Sales Tracker Dealers tab and cached in a **hold-only** tab (`HoldMergeCache`), never written onto warehouse Dealers. Refresh it with **Refresh merged list**. The 15-minute Sales Tracker sync is unchanged. Auto-hold / unhold use only the dealer saved on the list, not aliases or merged-away names.
 
 ## Billing template
 

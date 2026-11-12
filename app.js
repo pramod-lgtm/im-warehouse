@@ -116,8 +116,7 @@ function vHoldList(v) {
     var hl = rs[0], open = rs[1].filter(function (o) { return o.stage !== 'cancelled' && o.stage !== 'dispatched' && !o.invoice_no && S.m.stages.indexOf(o.stage) < S.m.stages.indexOf('billed'); }), match = [];
     var mg = hl.merge || {}, mergeAt = mg.at ? ftm(mg.at) : 'abhi pull nahi hua';
     v.innerHTML = '<div class="row"><h2>Hold dealers list</h2><button class="sm good" id="hx" style="flex:0;white-space:nowrap">⬇️ HOLD orders Excel</button></div><p class="small muted">Is list ke dealers ke naye orders apne aap HOLD ho jaate hain, jab tak agli list import na ho. List date: <b>' + h(hl.list_date || '-') + '</b> • ' + hl.entries.length + ' dealers' +
-      (mg.unmatched ? ' • <span class="short">' + mg.unmatched + ' unmatched</span>' : '') +
-      ' • Sales Tracker merged list: <b>' + h(mergeAt) + '</b> <button type="button" class="sm" id="hmr">Refresh merged list</button></p>' +
+      ' • Hold import ke liye Sales Tracker merged list: <b>' + h(mergeAt) + '</b> <button type="button" class="sm" id="hmr">Refresh merged list</button></p>' +
       '<div class="card">' + (hl.entries.length ? table(hl.entries, [['dealer_name', 'Dealer', function (x, r) { return holdDealerCell(r); }], ['why', 'Reason'], ['brand', 'Brand'], ['os', 'OS', inr], ['created_by', 'Kisne'], ['id', '', function (x) { return '<button class="sm good" data-ud="' + x + '">Dealer UNHOLD</button> <button class="sm warn" data-rm="' + x + '">Hatao</button>'; }]]) : '<span class="muted">List khali hai.</span>') + '</div>' +
       '<details class="card"><summary><b>+ Ek dealer jodein</b></summary><datalist id="dl_hd">' + hl.dealers.map(function (d) { return '<option value="' + h(d.name) + '">'; }).join('') + '</datalist><label>Dealer</label><input id="ad" list="dl_hd" placeholder="Naam search karein"><div class="grid2"><div><label>Reason</label><input id="aw" placeholder="CHEQUE BOUNCE / >100d"></div><div><label>Brand</label><input id="ab" placeholder="TRYLO / C9 / BOTH"></div></div><label>OS (Rs)</label><input id="ao" inputmode="numeric"><button class="primary" id="aa" style="margin-top:8px">Jodein + open orders hold karein</button></details>' +
       '<details class="card"><summary><b>Nayi list import (purani list replace hogi)</b></summary><p class="small muted">Excel se paste karein: Dealer | Reason | Brand | OS (har line ek dealer).</p><label>List date</label><input id="ld" placeholder="24-Oct" value="' + h(hl.list_date) + '"><textarea id="lp" rows="6" style="width:100%"></textarea><button id="lm" style="margin-top:6px">Match karein</button><div id="lr"></div></details>' +
@@ -166,13 +165,10 @@ function ftm(iso) { var t = Date.parse(iso); if (!isFinite(t)) return ''; var d 
 function days(from) { var t = Date.parse(from); return isFinite(t) ? Math.max(0, Math.floor((Date.now() - t) / 86400000)) : ''; }
 function holdType(o) { return /^Hold list/i.test(o.hold_by || '') ? 'HOLD list' + (o.hold_reason === 'Cheque bounce' ? ' (Cheque bounce)' : '') : (o.hold_reason === 'Cheque bounce' ? 'Cheque bounce' : 'Manual'); }
 function holdDealerCell(e) {
-  var raw = e.raw_name || e.list_name || e.dealer_name || '';
-  var merged = e.merged_name || '';
-  var st = e.merge_status || (merged ? 'matched' : '');
-  var flag = st === 'unmatched' ? ' <span class="pill st-hold">unmatched</span>' : (st === 'maybe' ? ' <span class="pill st-hold">pakka nahi</span>' : '');
-  var title = merged || raw || '-';
-  var sub = (raw && merged && raw.toUpperCase() !== merged.toUpperCase()) ? '<div class="small muted">List mein: ' + h(raw) + '</div>' : '';
-  return '<b>' + h(title) + '</b>' + flag + sub;
+  var name = e.dealer_name || e.merged_name || '';
+  var raw = e.list_name || e.raw_name || '';
+  var sub = (raw && name && raw.toUpperCase() !== name.toUpperCase()) ? '<div class="small muted">List mein: ' + h(raw) + '</div>' : '';
+  return '<b>' + h(name || raw || '-') + '</b>' + sub;
 }
 function holdRows(orders, hl) {
   var bySrc = {}, byName = {}, dl = {};
