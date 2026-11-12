@@ -57,3 +57,12 @@ After a dealer search in Meri queue, admin / warehouse manager can select 2+ ord
 
 ## Order SLA
 Every order must be billed within `sla_hours` of being received (Sales Tracker visit time, or create time for in-app orders). After `cutoff_time`, before `open_time`, and on holidays / weekly off the deadline moves as per the Settings tab. Managers can mark "Waiting for purchase - <brand>" on an order, and record "Purchase aaya" (Dashboard > 📦) to give pending orders of that brand a new deadline. Dashboard shows On time / Due soon / Delayed / Waiting for stock, delayed report and on-time % by day.
+
+## Pending leftover (old order)
+When a dealer's earlier order was only partly fulfilled (short pick / billed less than ordered), the leftover quantity stays on **that old order**. Do not raise a new order just to execute that pending.
+
+Warehouse manager (or admin): tap the **dealer name** in Meri queue, review orders with leftover pending, open the order, tap **Pending executed**, and enter the date, brand/item quantity, bill/invoice no, and an optional photo. Each save is a separate execution; remaining pending reduces automatically and the order is marked **Pending complete** at zero. Execution history is on the order page.
+
+Meri queue also has a **Pending leftover** chip (includes already dispatched orders). If a new order arrives for a dealer who still has older leftover pending, a warning is shown on the queue card, the order page, and New order. This is separate from **Pending for billing** (orders not yet billed).
+
+Frontend sw **im-warehouse-v31**. Backend schema **20** (`PendingExec` tab).

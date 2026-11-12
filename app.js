@@ -30,7 +30,7 @@ function masters(force) { if (S.m && !force) return Promise.resolve(S.m); return
 function role() { return S.user && S.user.role; }
 function isMgr() { return role() === 'admin' || role() === 'warehouse_manager'; }
 function isAdmin() { return role() === 'admin'; }
-function can(p) { var P = { view: ['admin', 'warehouse_manager'], bills: ['admin', 'warehouse_manager', 'biller'], hold: ['admin', 'warehouse_manager', 'biller', 'coordinator'], holdmgr: ['admin', 'warehouse_manager', 'coordinator'], delivery: ['admin', 'warehouse_manager', 'dispatch'], sync: ['admin', 'warehouse_manager', 'biller'], manage: ['admin'], recvtime: ['admin', 'warehouse_manager'], routes: ['admin', 'warehouse_manager', 'coordinator'] }; return (P[p] || []).indexOf(role()) >= 0; }
+function can(p) { var P = { view: ['admin', 'warehouse_manager'], bills: ['admin', 'warehouse_manager', 'biller'], hold: ['admin', 'warehouse_manager', 'biller', 'coordinator'], holdmgr: ['admin', 'warehouse_manager', 'coordinator'], delivery: ['admin', 'warehouse_manager', 'dispatch'], sync: ['admin', 'warehouse_manager', 'biller'], manage: ['admin'], recvtime: ['admin', 'warehouse_manager'], routes: ['admin', 'warehouse_manager', 'coordinator'], pendingexec: ['admin', 'warehouse_manager'] }; return (P[p] || []).indexOf(role()) >= 0; }
 function stageLbl(s) { return (S.m && S.m.stage_label[s]) || s; }
 function ono(o) { return o.order_no || (/^W-/.test(o.src_id) ? o.src_id : '#' + o.id); }
 function trk(o) { return o.track_no ? '<span class="trk">' + h(o.track_no) + '</span> ' : ''; }
@@ -47,7 +47,7 @@ function planBadge(o) {
   if (Number(o.plan_override)) bits.push('<span class="pill src">Override</span>');
   return bits.length ? ' ' + bits.join(' ') : '';
 }
-function badges(o) { return ' <span class="pill src">' + h(srcOf(o)) + '</span>' + (o.priority === 'Urgent' ? ' <span class="pill st-hold">URGENT</span>' : '') + ((o.dups || []).length ? ' <span class="pill st-hold" title="Same dealer, overlapping items / amount, paas ki date">⚠ Possible duplicate</span>' : '') + planBadge(o); }
+function badges(o) { return ' <span class="pill src">' + h(srcOf(o)) + '</span>' + (o.priority === 'Urgent' ? ' <span class="pill st-hold">URGENT</span>' : '') + ((o.dups || []).length ? ' <span class="pill st-hold" title="Same dealer, overlapping items / amount, paas ki date">⚠ Possible duplicate</span>' : '') + (o.pending_status === 'open' && Number(o.pending_qty) > 0 ? ' <span class="pill st-hold">Pending leftover ' + pcs(o.pending_qty) + '</span>' : '') + (o.pending_status === 'complete' ? ' <span class="pill" style="background:#e6f4ea;color:#1e7e34">Pending complete</span>' : '') + planBadge(o); }
 function pill(o) { return '<span class="pill st-' + h(o.stage) + '">' + h(stageLbl(o.stage)) + '</span>' + (o.stage === 'new' && Number(o.needs_punch) ? ' <span class="pill st-hold">Trylo: punching baaki</span>' : '') + (Number(o.hold) ? ' <span class="pill st-hold">HOLD</span>' : ''); }
 // ---------------- SLA (bill within deadline)
 var SLA_CLS = { 'On time': 'sla-ok', 'Due soon': 'sla-soon', 'Delayed': 'sla-late', 'Waiting for stock': 'sla-wait' };
@@ -88,11 +88,16 @@ function nav(cur) {
   n.innerHTML = NAV.filter(function (x) { return !x[3] || can(x[3]); }).map(function (x) { return '<a href="#' + x[0] + '" class="' + (cur.indexOf(x[0]) === 0 ? 'on' : '') + '"><i>' + x[1] + '</i>' + x[2] + '</a>'; }).join('');
   n.classList.remove('hidden');
 }
+function hashQuery() {
+  var s = (location.hash.split('?')[1] || ''), o = {};
+  s.split('&').forEach(function (kv) { if (!kv) return; var i = kv.indexOf('='), k = i < 0 ? kv : kv.slice(0, i), v = i < 0 ? '' : kv.slice(i + 1); try { o[decodeURIComponent(k)] = decodeURIComponent(v.replace(/\+/g, ' ')); } catch (e) { o[k] = v; } });
+  return o;
+}
 function route() {
-  var p = location.hash.slice(1) || '/q', v = $('view');
+  var raw = location.hash.slice(1) || '/q', p = raw.split('?')[0], v = $('view');
   if (p !== '/setup' && !S.token) p = '/login';
   $('who').textContent = S.user ? S.user.name + ' (' + S.user.role_label + ')' : '';
-  nav(p); window.scrollTo(0, 0);
+  nav(p === '/login' || p === '/setup' ? p : raw.split('?')[0]); window.scrollTo(0, 0);
   if (p === '/login') return vLogin(v); if (p === '/setup') return vSetup(v);
   masters().then(function () {
     if (p.indexOf('/o/') === 0) return vOrder(v, Number(p.slice(3)));
@@ -248,16 +253,22 @@ function vSetup(v) {
 }
 
 // ---------------- lists
+function dealerHref(o) { return '#/q?d=' + encodeURIComponent(o.dealer_name || '') + (o.dealer_src_id ? '&src=' + encodeURIComponent(o.dealer_src_id) : ''); }
+function pendingWarnHtml(o) {
+  var w = o.pending_warn; if (!w) return '';
+  return '<div class="small short">⚠ Is dealer ka pehle order mein pending baaki hai: <b>' + pcs(w.remaining) + '</b> (' + (w.orders || []).map(function (x) { return '<a href="#/o/' + x.id + '">' + h(x.track_no || x.order_no || '#' + x.id) + '</a>'; }).join(', ') + '). Naya order mat banao — purane order par Pending executed use karein.</div>';
+}
 function cardInner(o) {
-  return '<div class="row"><b>' + trk(o) + h(ono(o)) + ' ' + h(o.dealer_name) + '</b><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div>' +
+  var dlink = '<a href="' + dealerHref(o) + '" style="text-decoration:underline">' + h(o.dealer_name) + '</a>';
+  return '<div class="row"><b><a href="#/o/' + o.id + '" style="color:inherit;text-decoration:none">' + trk(o) + h(ono(o)) + '</a> ' + dlink + '</b><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div>' +
     '<div class="small">' + slaBadge(o) + '</div><div class="small muted">' + h(dmy(o.order_date)) + ' • ' + (o.zone ? '<b>' + h(o.zone) + '</b> / ' : '') + h(o.area || 'area ?') + (o.route ? ' • ' + h(o.route) : '') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.salesman ? ' • ' + h(o.salesman) : '') + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.expected_date ? ' • exp ' + h(dmy(o.expected_date)) : '') + (o.plan_delivery_date ? ' • plan ' + h(dmy(o.plan_delivery_date)) + (o.plan_van ? ' ' + h(o.plan_van) : '') : '') + '</div>' +
     '<div class="small">' + (o.lines || []).map(function (l) { return h(l.brand) + ' ' + pcs(l.ordered_qty); }).join(' + ') + ((o.lines || []).length > 1 ? ' = <b>' + pcs(o.pcs) + '</b>' : '') +
     [['Punch', o.punch_name], ['P', o.picker_name], ['C', o.checker_name], ['B', o.biller_name], ['Pk', o.packer_name]].filter(function (x) { return x[1]; }).map(function (x) { return ' • ' + x[0] + ': ' + h(x[1]); }).join('') + (o.invoice_no ? ' • Inv ' + h(o.invoice_no) : '') + (o.vehicle || o.delivery_mode ? ' • ' + h(o.vehicle || o.delivery_mode) : '') + '</div>' +
-    (Number(o.hold) ? '<div class="small short">Hold: ' + h(o.hold_reason) + ' ' + h(o.hold_note) + '</div>' : '') + (o.stage === 'cancelled' ? '<div class="small short">Cancel: ' + h(o.cancel_reason) + '</div>' : '');
+    (Number(o.hold) ? '<div class="small short">Hold: ' + h(o.hold_reason) + ' ' + h(o.hold_note) + '</div>' : '') + (o.stage === 'cancelled' ? '<div class="small short">Cancel: ' + h(o.cancel_reason) + '</div>' : '') + pendingWarnHtml(o);
 }
 function card(o, sel) {
-  if (!sel) return '<a class="card" style="display:block;text-decoration:none;color:inherit" href="#/o/' + o.id + '">' + cardInner(o) + '</a>';
-  return '<div class="card" style="display:flex;align-items:flex-start;gap:8px"><label style="flex:none;padding-top:2px"><input type="checkbox" class="qsel" data-id="' + o.id + '" style="width:22px;height:22px"></label><a style="flex:1;text-decoration:none;color:inherit" href="#/o/' + o.id + '">' + cardInner(o) + '</a></div>';
+  var body = '<div class="card"' + (sel ? ' style="display:flex;align-items:flex-start;gap:8px"' : '') + '>' + (sel ? '<label style="flex:none;padding-top:2px"><input type="checkbox" class="qsel" data-id="' + o.id + '" style="width:22px;height:22px"></label><div style="flex:1">' : '') + cardInner(o) + (sel ? '</div>' : '') + '</div>';
+  return body;
 }
 function newBtn() { return canNew() ? '<button class="sm primary" onclick="location.hash=\'#/new\'">+ New order</button>' : ''; }
 function syncBtn() { return newBtn() + (can('sync') ? '<button class="sm" id="sync">🔄 Sync now</button>' : ''); }
@@ -273,15 +284,69 @@ function qRange(k, d1, d2) {
     default: return null;
   }
 }
+function leftoverCard(o) {
+  var lines = (o.pending_lines || []).filter(function (l) { return Number(l.remaining) > 0; }).map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ' ' + pcs(l.remaining); }).join(' + ');
+  var btn = can('pendingexec') && o.pending_status === 'open' ? ' <button type="button" class="sm primary" data-pex="' + o.id + '">Pending executed</button>' : '';
+  return '<div class="card">' + cardInner(o) + '<div class="small">Baaki: <b>' + pcs(o.pending_qty) + '</b>' + (lines ? ' • ' + lines : '') + btn + '</div></div>';
+}
+function pendingExecFormHtml(o) {
+  var rows = (o.pending_lines || []).map(function (l) {
+    var rem = Number(l.remaining) || 0;
+    return '<div class="row" style="margin:6px 0;align-items:center"><div style="flex:1"><b>' + h(l.brand) + (l.item ? ' ' + h(l.item) : '') + '</b><div class="small muted">Baaki ' + pcs(rem) + (l.opening != null ? ' / opening ' + pcs(l.opening) : '') + '</div></div>' +
+      (rem > 0 ? '<input class="pexq" data-line="' + h(l.line_id) + '" type="number" min="0" max="' + rem + '" placeholder="0" style="width:90px;flex:0">' : '<span class="small muted">0</span>') + '</div>';
+  }).join('') || '<p class="muted small">Line-wise pending nahi mila — total baaki ' + pcs(o.pending_qty) + '</p>';
+  return '<div id="pexbox"><h3>Pending executed — ' + trk(o) + h(ono(o)) + ' ' + h(o.dealer_name) + '</h3><p class="small muted">Yeh purane order ke leftover pending par jayega, naya order nahi banega. Baaki: <b>' + pcs(o.pending_qty) + '</b></p>' +
+    '<label>Executed date</label><input type="date" id="pexd" value="' + h(today()) + '">' +
+    '<div style="margin-top:8px"><b>Quantity (brand / item)</b>' + rows + '</div>' +
+    '<div class="grid2" style="margin-top:8px"><div><label>Bill / invoice no</label><input id="pexi" placeholder="Invoice no"></div><div><label>Note (optional)</label><input id="pexn"></div></div>' +
+    '<label style="margin-top:8px">Photo (optional)</label><input type="file" id="pexf" accept="image/*" capture="environment"><div class="small muted" id="pexs"></div><img id="pexv" style="max-width:160px;max-height:160px;display:none;margin-top:6px;border:1px solid var(--line)">' +
+    '<button class="primary big" id="pexsav" style="margin-top:12px">Save pending executed</button></div>';
+}
+function bindPendingExecForm(o, ondone) {
+  var photo = null;
+  if ($('pexf')) $('pexf').onchange = function () {
+    var f = this.files && this.files[0]; if (!f) return;
+    compressImg(f).then(function (ph) { photo = ph; $('pexv').src = ph.url; $('pexv').style.display = ''; $('pexs').textContent = 'Ready (' + Math.round(ph.b64.length * 0.75 / 1024) + ' KB)'; }).catch(fail);
+  };
+  $('pexsav').onclick = function () {
+    var lines = [];
+    Array.prototype.forEach.call(document.querySelectorAll('.pexq'), function (i) { if (i.value !== '' && isFinite(Number(i.value)) && Number(i.value) > 0) lines.push({ line_id: i.getAttribute('data-line'), qty: Number(i.value) }); });
+    if (!lines.length) return toast('Kam se kam ek quantity daalein', 'err');
+    var d = { order_id: o.id, exec_date: val('pexd'), invoice_no: val('pexi'), note: val('pexn'), lines: lines };
+    if (photo) { d.b64 = photo.b64; d.mime = photo.mime; }
+    if (!confirm('Is pending ko purane order ' + (o.track_no || ono(o) || ('#' + o.id)) + ' par record karein?')) return;
+    call('savePendingExec', d).then(function (r) {
+      toast(r.status === 'complete' ? 'Pending complete ✔' : 'Save ho gaya • baaki ' + pcs(r.remaining));
+      var sh = document.querySelector('.sheet'); if (sh) sh.remove();
+      if (ondone) ondone(r);
+    }).catch(function (e) { if (/Unknown action/i.test(String(e && e.message || e))) toast('Server update baaki hai — pehle naya Code.gs (v31) deploy karein', 'err'); else fail(e); });
+  };
+}
+function openPendingExec(o, ondone) {
+  if (!can('pendingexec')) return toast('Sirf warehouse manager pending execute kar sakte hain', 'err');
+  if (o.pending_status !== 'open' || !(Number(o.pending_qty) > 0)) return toast('Is order par leftover pending nahi hai', 'err');
+  if (!(o.pending_lines && o.pending_lines.length)) {
+    return call('order', { id: o.id }).then(function (r) { openPendingExec(r.order, ondone); }).catch(fail);
+  }
+  sheet(pendingExecFormHtml(o));
+  bindPendingExecForm(o, ondone);
+}
+
 function vQueue(v) {
+  var hq = hashQuery();
   var jobs = [call('orders', {})];
   if (can('view')) jobs.push(call('dupList').catch(function () { return null; }));
+  else jobs.push(Promise.resolve(null));
+  jobs.push(call('pendingLeft').catch(function () { return null; }));
+  if (hq.d) jobs.push(call('dealerPending', { dealer_name: hq.d, dealer_src_id: hq.src || '' }).catch(function () { return null; }));
+  else jobs.push(Promise.resolve(null));
   Promise.all(jobs).then(function (rs) {
-    var list = rs[0], dupPairs = rs[1];
+    var list = rs[0], dupPairs = rs[1], left = rs[2], dealerPend = rs[3];
     var k = LS.getItem('imw_qf') || '', d1 = LS.getItem('imw_qd1') || '', d2 = LS.getItem('imw_qd2') || '';
-    var qs = LS.getItem('imw_qs') || '', dq = '';
+    var qs = LS.getItem('imw_qs') || '', dq = hq.d || '';
     var opts = [['', 'Sab dates'], ['today', 'Aaj'], ['yday', 'Kal'], ['week', 'Is hafte'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
-    var stageOpts = [['', 'Sab'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['hold', 'HOLD'], ['dup', '⚠ Duplicates'], ['pending_bill', 'Pending for billing']];
+    var stageOpts = [['', 'Sab'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['hold', 'HOLD'], ['dup', '⚠ Duplicates'], ['pending_bill', 'Pending for billing'], ['pending_left', 'Pending leftover']];
+
     v.innerHTML = '<div class="row"><h2>Meri queue (<span id="qn">' + list.length + '</span>)</h2>' + syncBtn() + '</div><p class="small muted">Last sync: ' + tm(S.m.last_sync) + '</p>' +
       '<div class="row"><select id="qf">' + opts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === k ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
       '<input type="date" id="qd1" value="' + h(d1) + '" title="Date / From"><input type="date" id="qd2" value="' + h(d2) + '" title="To"></div>' +
@@ -295,6 +360,7 @@ function vQueue(v) {
       if (st === 'picking') return o.stage === 'allocated';
       if (st === 'checking') return o.stage === 'picked';
       if (st === 'billing') return o.stage === 'checked';
+      if (st === 'pending_left') return o.pending_status === 'open' && Number(o.pending_qty) > 0;
       return o.stage === st;
     }
     function qDealerOk(o, q) {
@@ -312,8 +378,11 @@ function vQueue(v) {
       var pairs = dupPairs != null ? dupPairs : dupPairsFromOrders(list);
       var shownDups = dupGroupsInList(dupGroupList(pairs), mid);
       $('qstages').innerHTML = stageOpts.map(function (s) {
-        var n = s[0] === 'dup' ? shownDups.length : mid.filter(function (o) { return qStageOk(o, s[0]); }).length;
-        return '<button type="button" class="sm' + (qs === s[0] ? ' primary' : (s[0] === 'dup' && n ? ' danger' : '')) + '" data-qs="' + s[0] + '">' + s[1] + ' (' + n + ')</button>';
+        var n, leftList = (left && left.orders) || [];
+        if (s[0] === 'dup') n = shownDups.length;
+        else if (s[0] === 'pending_left') n = (dq ? leftList.filter(function (o) { return qDealerOk(o, dq); }) : leftList).length;
+        else n = mid.filter(function (o) { return qStageOk(o, s[0]); }).length;
+        return '<button type="button" class="sm' + (qs === s[0] ? ' primary' : ((s[0] === 'dup' || s[0] === 'pending_left') && n ? ' danger' : '')) + '" data-qs="' + s[0] + '">' + s[1] + ' (' + n + ')</button>';
       }).join('');
       Array.prototype.forEach.call(document.querySelectorAll('#qstages [data-qs]'), function (b) {
         b.onclick = function () { qs = b.getAttribute('data-qs'); LS.setItem('imw_qs', qs); draw(); };
@@ -329,13 +398,27 @@ function vQueue(v) {
         bindDupGroupActions($('qlst'), shownDups, function () { vQueue(v); });
         return;
       }
+      if (qs === 'pending_left') {
+        var lo = ((left && left.orders) || []).filter(function (o) { return qDealerOk(o, dq); });
+        $('qn').textContent = lo.length;
+        $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : '') + '<b>' + lo.length + '</b> orders with leftover pending, <b>' + pcs((dq ? lo : (left && left.orders) || []).reduce(function (a, o) { return a + (Number(o.pending_qty) || 0); }, 0)) + ' baaki</b>. Purane order par record karein — naya order nahi.';
+        $('qlst').innerHTML = lo.length ? lo.map(leftoverCard).join('') : '<div class="card center muted">Koi leftover pending nahi.</div>';
+        Array.prototype.forEach.call(v.querySelectorAll('[data-pex]'), function (b) { b.onclick = function () { var id = Number(b.getAttribute('data-pex')); var o = lo.filter(function (x) { return Number(x.id) === id; })[0]; if (o) openPendingExec(o, function () { vQueue(v); }); }; });
+        return;
+      }
       var f = mid.filter(function (o) { return qStageOk(o, qs); });
       var tp = f.reduce(function (a, o) { return a + (Number(o.pcs) || 0); }, 0);
       var canMark = isMgr() && !!dq;
+      var pendHead = '';
+      if (dq && dealerPend) {
+        var openP = dealerPend.open || [];
+        if (openP.length) pendHead = '<div class="card" style="border-color:var(--danger, #c0392b)"><h3>Is dealer ke leftover pending (' + openP.length + ')</h3><p class="small muted">Pehle order ki baaki qty yahan record karein. Combined baaki <b>' + pcs(dealerPend.remaining) + '</b>.</p>' + openP.map(leftoverCard).join('') + '</div>';
+      }
       $('qn').textContent = f.length + (r || dq || qs ? ' / ' + list.length : '');
       $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : 'Sab: ') + '<b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>' +
         (canMark ? ' · <button type="button" class="sm primary" id="qmd">Mark duplicate</button> <span class="small muted">2+ orders select karke mark karein</span>' : '');
-      $('qlst').innerHTML = f.length ? f.map(function (o) { return card(o, canMark); }).join('') : '<div class="card center muted">' + ((r || dq || qs) ? 'Is filter mein koi order nahi.' : 'Abhi koi kaam nahi.') + '</div>';
+      $('qlst').innerHTML = pendHead + (f.length ? f.map(function (o) { return card(o, canMark); }).join('') : (pendHead ? '' : '<div class="card center muted">' + ((r || dq || qs) ? 'Is filter mein koi order nahi.' : 'Abhi koi kaam nahi.') + '</div>'));
+      Array.prototype.forEach.call(v.querySelectorAll('[data-pex]'), function (b) { b.onclick = function () { var id = Number(b.getAttribute('data-pex')); var o = ((dealerPend && dealerPend.open) || []).filter(function (x) { return Number(x.id) === id; })[0]; if (o) openPendingExec(o, function () { vQueue(v); }); }; });
       if (canMark && $('qmd')) $('qmd').onclick = function () {
         var ids = Array.prototype.map.call(v.querySelectorAll('.qsel:checked'), function (x) { return Number(x.dataset.id); });
         if (ids.length < 2) return toast('Kam se kam 2 orders chunein', 'err');
@@ -346,6 +429,7 @@ function vQueue(v) {
     $('qf').onchange = function () { k = this.value; LS.setItem('imw_qf', k); if ((k === 'date' || k === 'range') && !d1) { d1 = today(); $('qd1').value = d1; LS.setItem('imw_qd1', d1); } draw(); };
     $('qd1').onchange = function () { d1 = this.value; LS.setItem('imw_qd1', d1); draw(); };
     $('qd2').onchange = function () { d2 = this.value; LS.setItem('imw_qd2', d2); draw(); };
+    if ($('qdl') && dq) $('qdl').value = dq;
     $('qdl').oninput = function () { dq = this.value.trim(); draw(); };
     draw(); bindSync(function () { vQueue(v); });
   }).catch(fail);
@@ -357,13 +441,13 @@ function vAll(v) {
     var vans = (S.m.van_plan && S.m.van_plan.vans) || ['DL1LAP-0938', 'DL1LZ-6422'];
     function draw() {
       var f = list.filter(function (o) {
-        var ok = !st || (st === 'hold' ? Number(o.hold) : st === 'dup' ? (o.dups || []).length : st === 'punch_pending' ? o.stage === 'new' && Number(o.needs_punch) : st === 'unmapped' ? (o.plan_flag === 'unmapped' || /^unmapped$/i.test(String(o.zone || '')) || !String(o.area || '').trim()) : st === 'kal' ? String(o.plan_delivery_date) === addDays(today(), 1) : st === 'aaj_plan' ? String(o.plan_delivery_date) === today() : o.stage === st);
+        var ok = !st || (st === 'hold' ? Number(o.hold) : st === 'dup' ? (o.dups || []).length : st === 'pending_left' ? o.pending_status === 'open' && Number(o.pending_qty) > 0 : st === 'punch_pending' ? o.stage === 'new' && Number(o.needs_punch) : st === 'unmapped' ? (o.plan_flag === 'unmapped' || /^unmapped$/i.test(String(o.zone || '')) || !String(o.area || '').trim()) : st === 'kal' ? String(o.plan_delivery_date) === addDays(today(), 1) : st === 'aaj_plan' ? String(o.plan_delivery_date) === today() : o.stage === st);
         return ok && (!sf || srcOf(o) === sf) && (!pv || String(o.plan_van) === pv) && (!pd || String(o.plan_delivery_date) === pd);
       }), q = (val('q') || '').toUpperCase();
       if (q) f = f.filter(function (o) { return (o.track_no + ' ' + ono(o) + ' ' + o.dealer_name + ' ' + o.zone + ' ' + o.area + ' ' + o.route + ' ' + o.invoice_no + ' ' + (o.plan_van || '')).toUpperCase().indexOf(q) >= 0; });
       $('lst').innerHTML = f.map(card).join('') || '<div class="card center muted">Kuch nahi</div>';
     }
-    v.innerHTML = '<div class="row"><h2>Sab orders</h2>' + syncBtn() + '<button class="sm" id="ex">CSV</button>' + (function (n) { return '<a class="btn sm' + (n ? ' danger' : '') + '" href="#/dup">⚠ Duplicates' + (n ? ' (' + n + ')' : '') + '</a>'; })(list.filter(function (o) { return (o.dups || []).length; }).length) + '</div><div class="row"><select id="st"><option value="">Sab stage</option>' + S.m.stages.map(function (s) { return '<option value="' + s + '"' + (st === s ? ' selected' : '') + '>' + h(stageLbl(s)) + '</option>'; }).join('') + '<option value="punch_pending"' + (st === 'punch_pending' ? ' selected' : '') + '>Trylo: punching baaki</option><option value="hold"' + (st === 'hold' ? ' selected' : '') + '>HOLD</option><option value="dup"' + (st === 'dup' ? ' selected' : '') + '>⚠ Possible duplicates</option><option value="aaj_plan"' + (st === 'aaj_plan' ? ' selected' : '') + '>Aaj plan delivery</option><option value="kal"' + (st === 'kal' ? ' selected' : '') + '>Kal plan delivery</option><option value="unmapped"' + (st === 'unmapped' ? ' selected' : '') + '>Unmapped area</option><option value="cancelled"' + (st === 'cancelled' ? ' selected' : '') + '>Cancel</option></select><select id="sf"><option value="">Sab source</option>' + ['Sales Tracker'].concat(S.m.sources || []).map(function (x) { return '<option' + (x === sf ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select></div><div class="row"><select id="pv"><option value="">Sab van</option>' + vans.map(function (x) { return '<option value="' + h(x) + '"' + (x === pv ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select><input type="date" id="pd" value="' + h(pd) + '" title="Plan delivery date"><input id="q" placeholder="Tracking / dealer / area / van"></div><div id="lst" style="margin-top:10px"></div>';
+    v.innerHTML = '<div class="row"><h2>Sab orders</h2>' + syncBtn() + '<button class="sm" id="ex">CSV</button>' + (function (n) { return '<a class="btn sm' + (n ? ' danger' : '') + '" href="#/dup">⚠ Duplicates' + (n ? ' (' + n + ')' : '') + '</a>'; })(list.filter(function (o) { return (o.dups || []).length; }).length) + '</div><div class="row"><select id="st"><option value="">Sab stage</option>' + S.m.stages.map(function (s) { return '<option value="' + s + '"' + (st === s ? ' selected' : '') + '>' + h(stageLbl(s)) + '</option>'; }).join('') + '<option value="punch_pending"' + (st === 'punch_pending' ? ' selected' : '') + '>Trylo: punching baaki</option><option value="hold"' + (st === 'hold' ? ' selected' : '') + '>HOLD</option><option value="pending_left"' + (st === 'pending_left' ? ' selected' : '') + '>Pending leftover</option><option value="dup"' + (st === 'dup' ? ' selected' : '') + '>⚠ Possible duplicates</option><option value="aaj_plan"' + (st === 'aaj_plan' ? ' selected' : '') + '>Aaj plan delivery</option><option value="kal"' + (st === 'kal' ? ' selected' : '') + '>Kal plan delivery</option><option value="unmapped"' + (st === 'unmapped' ? ' selected' : '') + '>Unmapped area</option><option value="cancelled"' + (st === 'cancelled' ? ' selected' : '') + '>Cancel</option></select><select id="sf"><option value="">Sab source</option>' + ['Sales Tracker'].concat(S.m.sources || []).map(function (x) { return '<option' + (x === sf ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select></div><div class="row"><select id="pv"><option value="">Sab van</option>' + vans.map(function (x) { return '<option value="' + h(x) + '"' + (x === pv ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select><input type="date" id="pd" value="' + h(pd) + '" title="Plan delivery date"><input id="q" placeholder="Tracking / dealer / area / van"></div><div id="lst" style="margin-top:10px"></div>';
     $('st').onchange = function () { st = this.value; LS.setItem('imw_f', st); draw(); }; $('sf').onchange = function () { sf = this.value; LS.setItem('imw_sf', sf); draw(); };
     $('pv').onchange = function () { pv = this.value; LS.setItem('imw_pv', pv); draw(); }; $('pd').onchange = function () { pd = this.value; LS.setItem('imw_pd', pd); draw(); };
     $('q').oninput = draw; draw(); bindSync(function () { vAll(v); });
@@ -564,6 +648,21 @@ var STEPS = [['punch', 'punched_at', 'punched_by', 'Order Punching (Trylo)'], ['
 var STEP_ROLES = { punch: ['admin', 'warehouse_manager', 'biller', 'coordinator'], allocate: ['admin', 'warehouse_manager'], pick: ['admin', 'warehouse_manager', 'picker'], check: ['admin', 'warehouse_manager', 'checker'], bill: ['admin', 'warehouse_manager', 'biller'], pack: ['admin', 'warehouse_manager', 'packer'], dispatch: ['admin', 'warehouse_manager', 'dispatch'] };
 function nextStep(o) { return o.stage === 'new' && Number(o.needs_punch) ? 'punch' : NEXT[o.stage]; }
 var NEXT = { new: 'allocate', punched: 'allocate', allocated: 'pick', picked: 'check', checked: 'bill', billed: 'pack', packed: 'dispatch' };
+function pendingExecCard(o) {
+  var p = o.pending || { remaining: o.pending_qty, status: o.pending_status, lines: o.pending_lines || [] };
+  var hist = (o.pending_execs || []).map(function (g) {
+    var ls = (g.lines || []).map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ' ' + pcs(l.qty); }).join(' + ');
+    var ph = g.photo_id ? ' <button type="button" class="sm" data-pexph="' + h(g.lines[0] && g.lines[0].id || '') + '">Photo</button>' : '';
+    return '<div class="small" style="margin:6px 0"><b>' + h(dmy(g.exec_date)) + '</b> • ' + pcs(g.qty) + (g.invoice_no ? ' • Inv ' + h(g.invoice_no) : '') + ' • ' + h(g.by_name || '') + ph + '<div class="muted">' + ls + (g.note ? ' • ' + h(g.note) : '') + '</div></div>';
+  }).join('') || '<p class="muted small">Abhi koi pending execution nahi.</p>';
+  var status = p.status === 'complete' ? '<span class="pill" style="background:#e6f4ea;color:#1e7e34">Pending complete</span>' : (p.status === 'open' && Number(p.remaining) > 0 ? '<span class="pill st-hold">Baaki ' + pcs(p.remaining) + '</span>' : '');
+  if (!p.status && !(o.pending_execs || []).length) return pendingWarnHtml(o);
+  var btn = can('pendingexec') && p.status === 'open' && Number(p.remaining) > 0 ? '<button class="primary" id="pexbtn" style="margin-top:8px">Pending executed</button>' : '';
+  var warn = pendingWarnHtml(o);
+  return warn + '<div class="card"><h3>Pending leftover</h3><p class="small">Pehli fulfillment ke baad jo qty baaki thi, usko yahan purane order par record karein (naya order nahi). ' + status + '</p>' +
+    ((p.lines || []).length ? '<div class="small">' + p.lines.map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ': baaki ' + pcs(l.remaining) + (l.opening != null ? ' (opening ' + pcs(l.opening) + ')' : ''); }).join('<br>') + '</div>' : '') +
+    btn + '<h3 style="margin-top:12px">Execution history</h3>' + hist + '</div>';
+}
 function vOrder(v, id) {
   call('order', { id: id }).then(function (r) {
     var o = r.order, manEdit = canNew() && /^W-/.test(o.src_id) && o.stage !== 'cancelled' && !o.invoice_no && S.m.stages.indexOf(o.stage) < S.m.stages.indexOf('billed'), nx = nextStep(o), mine = nx && STEP_ROLES[nx].indexOf(role()) >= 0 && !Number(o.hold), si = S.m.stages.indexOf(o.stage);
@@ -597,11 +696,11 @@ function vOrder(v, id) {
     var del = '';
     if (can('delivery') && si >= S.m.stages.indexOf('billed') && o.stage !== 'dispatched') del = '<div class="card"><h3>Delivery allocation</h3>' + delForm(o) + '<button class="primary big" id="delb" style="margin-top:10px">Save delivery</button></div>';
     var nb = r.nearby.length ? '<div class="card"><h3>Paas ke pending orders (' + r.nearby.length + ')</h3><p class="small muted">Inhe saath mein bill / dispatch karein.</p>' + r.nearby.map(function (x) { return '<div class="chk"><a href="#/o/' + x.id + '">' + h(x.track_no || '#' + x.id) + ' ' + h(x.dealer_name) + '</a><span class="small muted">' + h(x.why) + (x.km !== '' ? ' • ' + x.km + ' km' : '') + ' • ' + h(stageLbl(x.stage)) + (Number(x.hold) ? ' • HOLD' : '') + ' • ' + pcs(x.ordered_qty) + (x.zone ? ' • ' + h(x.zone) : '') + '</span></div>'; }).join('') + '</div>' : '';
-    v.innerHTML = '<div class="card"><div class="row"><h2>' + trk(o) + h(ono(o)) + ' ' + h(o.dealer_name) + '</h2><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div><div class="small muted">Zone ' + h(o.zone || '-') + ' • ' + h(o.area || 'area ?') + ' • ' + h(o.route || '-') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.lat !== '' ? ' • <a target="_blank" href="https://www.google.com/maps?q=' + o.lat + ',' + o.lng + '">map</a>' : '') + '</div>' + '<div class="small" style="margin-top:4px">' + slaBadge(o, true) + (can('recvtime') && o.sla && !o.sla.billed && o.stage !== 'cancelled' ? '<button class="sm" id="rte" style="margin-top:6px">⏱ Order aaya time badlein</button>' : '') + '</div>' + (o.remarks ? '<div class="small">Remark: ' + h(o.remarks) + '</div>' : '') +
+    v.innerHTML = '<div class="card"><div class="row"><h2>' + trk(o) + h(ono(o)) + ' <a href="' + dealerHref(o) + '" style="color:inherit">' + h(o.dealer_name) + '</a></h2><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div><div class="small muted">Zone ' + h(o.zone || '-') + ' • ' + h(o.area || 'area ?') + ' • ' + h(o.route || '-') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.lat !== '' ? ' • <a target="_blank" href="https://www.google.com/maps?q=' + o.lat + ',' + o.lng + '">map</a>' : '') + '</div>' + '<div class="small" style="margin-top:4px">' + slaBadge(o, true) + (can('recvtime') && o.sla && !o.sla.billed && o.stage !== 'cancelled' ? '<button class="sm" id="rte" style="margin-top:6px">⏱ Order aaya time badlein</button>' : '') + '</div>' + (o.remarks ? '<div class="small">Remark: ' + h(o.remarks) + '</div>' : '') +
       '<div class="small muted">Source: ' + h(srcOf(o)) + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.salesman ? ' • salesman: ' + h(o.salesman) : '') + (o.expected_date ? ' • expected dispatch ' + h(dmy(o.expected_date)) : '') + (o.edited_at ? ' • edited ' + tm(o.edited_at) + ' ' + h(o.edited_by) : '') + '</div>' +
       (o.stage === 'cancelled' ? '<div class="short">Cancel: ' + h(o.cancel_reason) + ' (' + tm(o.cancelled_at) + ', ' + h(o.cancelled_by) + ')</div>' : '') +
       (manEdit ? '<div class="row" style="margin-top:8px"><a class="btn sm" href="#/' + (isStore(o) ? 'sq/' : '') + 'edit/' + o.id + '">✏️ Edit</a><button class="sm danger" id="cnl">Cancel order</button></div>' : '') + '</div>' +
-      (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + dupCard(o, r.dup_orders) + (o.merged_into ? '<div class="card short">Ye order duplicate tha, <a href="#/o/' + h(o.merged_into) + '">' + h((o.merged_into_order && (o.merged_into_order.track_no || o.merged_into_order.order_no)) || '#' + o.merged_into) + '</a> mein merge hua (' + tm(o.merged_at) + ', ' + h(o.merged_by) + ')</div>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + tl + act + '</div>' + waitCard(o) + planCard(o) + hold + del + nb;
+      (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + dupCard(o, r.dup_orders) + (o.merged_into ? '<div class="card short">Ye order duplicate tha, <a href="#/o/' + h(o.merged_into) + '">' + h((o.merged_into_order && (o.merged_into_order.track_no || o.merged_into_order.order_no)) || '#' + o.merged_into) + '</a> mein merge hua (' + tm(o.merged_at) + ', ' + h(o.merged_by) + ')</div>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + tl + act + '</div>' + pendingExecCard(o) + waitCard(o) + planCard(o) + hold + del + nb;
     var b = $('stepb'); if (b) b.onclick = function () {
       var d = { id: o.id, action: nx };
       if (nx === 'allocate') {
@@ -630,6 +729,11 @@ function vOrder(v, id) {
     if ($('delb')) $('delb').onclick = function () { call('delivery', delData([o.id])).then(function () { toast('Delivery saved'); vOrder(v, id); }).catch(fail); };
     if ($('pov')) $('pov').onclick = function () { call('overridePlan', { id: o.id, plan_delivery_date: val('pdd'), plan_van: val('pdv'), plan_mode: val('pdm') }).then(function () { toast('Plan override saved'); vOrder(v, id); }).catch(fail); };
     if ($('pcl')) $('pcl').onclick = function () { call('overridePlan', { id: o.id, clear: 1 }).then(function () { toast('Override hata, auto plan'); vOrder(v, id); }).catch(fail); };
+    if ($('pexbtn')) $('pexbtn').onclick = function () { openPendingExec(o, function () { vOrder(v, id); }); };
+    Array.prototype.forEach.call(v.querySelectorAll('[data-pexph]'), function (b) {
+      b.onclick = function () { call('getPendingExecPhoto', { id: Number(b.getAttribute('data-pexph')) }).then(function (r) { sheet('<h3>Pending executed photo</h3><img src="data:' + h(r.mime) + ';base64,' + r.b64 + '" style="width:100%;height:auto">'); }).catch(fail); };
+    });
+
   }).catch(fail);
 }
 function waitCard(o) {
@@ -915,13 +1019,22 @@ function vNew(v, ed) {
   loadDealers().then(function (list) {
     var sel = ed ? list.filter(function (d) { return String(d.src_id) === String(ed.dealer_src_id); })[0] || { id: '', name: ed.dealer_name } : null, lines = ed ? ed.lines.map(function (l) { return { brand: l.brand, item: l.item, qty: l.ordered_qty, value: l.ordered_value }; }) : [{ brand: 'TRYLO' }];
     v.innerHTML = '<h2>' + (ed ? 'Edit ' + h(ono(ed)) : 'New order (phone / WhatsApp / walk-in)') + '</h2>' + dlists() + '<datalist id="dl_brand">' + BRANDS.map(function (b) { return '<option value="' + b + '">'; }).join('') + '</datalist>' +
-      '<div class="card"><label>Dealer</label><div id="dsel"></div><input id="ds" placeholder="Dealer ka naam search karein"' + (ed && ed.picked_at ? '' : '') + '><div id="dres"></div>' + (ed ? '' : '<label class="chk"><input type="checkbox" id="nd"> Naya dealer add karein</label><div id="ndf" class="hidden grid2"><div><label>Naam</label><input id="ndn"></div><div><label>Mobile</label><input id="ndm" inputmode="tel"></div><div><label>Area</label><input id="nda" list="dl_area"></div><div><label>Zone</label><input id="ndz" list="dl_zone"></div></div>') + '</div>' +
+      '<div class="card"><label>Dealer</label><div id="dsel"></div><div id="pdwarn"></div><input id="ds" placeholder="Dealer ka naam search karein"' + (ed && ed.picked_at ? '' : '') + '><div id="dres"></div>' + (ed ? '' : '<label class="chk"><input type="checkbox" id="nd"> Naya dealer add karein</label><div id="ndf" class="hidden grid2"><div><label>Naam</label><input id="ndn"></div><div><label>Mobile</label><input id="ndm" inputmode="tel"></div><div><label>Area</label><input id="nda" list="dl_area"></div><div><label>Zone</label><input id="ndz" list="dl_zone"></div></div>') + '</div>' +
       '<div class="card"><div class="grid2"><div><label>Source</label><select id="src">' + S.m.sources.filter(function (x) { return x !== STORE_SRC; }).map(function (x) { return '<option' + (ed && ed.source === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></div><div><label>Priority</label><select id="pri">' + S.m.priorities.map(function (x) { return '<option' + (ed && ed.priority === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></div>' +
       '<div><label>Order kisne liya (taken by)</label><input id="tb" value="' + h(ed ? ed.taken_by : S.user.name) + '"></div><div><label>Salesman (optional)</label><input id="sm" value="' + h(ed ? ed.salesman : '') + '"></div>' +
       '<div><label>Expected dispatch date</label><input id="exd" type="date" value="' + h(ed ? ed.expected_date : '') + '"></div></div></div>' +
       '<div class="card"><h3>Items</h3><div id="lns"></div><button class="sm" id="al">+ Line</button><div class="small muted" id="tot"></div></div>' +
       '<div class="card"><label>Remarks</label><textarea id="rm" rows="2">' + h(ed ? ed.remarks : '') + '</textarea></div><button class="primary big" id="sv">' + (ed ? 'Save changes' : 'Order banayein') + '</button>';
-    function showSel() { $('dsel').innerHTML = sel ? '<div class="chk"><b style="flex:1">' + h(sel.name) + '</b><span class="small muted">' + h(sel.zone || '') + ' ' + h(sel.area || '') + '</span></div>' : '<span class="small muted">Koi dealer nahi chuna</span>'; }
+    function showSel() { $('dsel').innerHTML = sel ? '<div class="chk"><b style="flex:1">' + h(sel.name) + '</b><span class="small muted">' + h(sel.zone || '') + ' ' + h(sel.area || '') + '</span></div>' : '<span class="small muted">Koi dealer nahi chuna</span>'; warnPend(sel); }
+    function warnPend(d) {
+      if (!$('pdwarn')) return;
+      if (!d || ed) { $('pdwarn').innerHTML = ''; return; }
+      call('dealerPending', { dealer_name: d.name, dealer_src_id: d.src_id || '' }).then(function (r) {
+        if (!$('pdwarn')) return;
+        if (r && r.open && r.open.length) $('pdwarn').innerHTML = '<div class="small short">⚠ Is dealer ke ' + r.open.length + ' pehle order mein pending baaki hai (' + pcs(r.remaining) + '). Naya order ki jagah purane order par <a href="#/q?d=' + encodeURIComponent(d.name) + '">Pending executed</a> use karein.</div>';
+        else $('pdwarn').innerHTML = '';
+      }).catch(function () { if ($('pdwarn')) $('pdwarn').innerHTML = ''; });
+    }
     $('ds').oninput = function () { var q = val('ds').toUpperCase(); $('dres').innerHTML = q.length < 2 ? '' : list.filter(function (d) { return d.name.toUpperCase().indexOf(q) >= 0 || String(d.mobile).indexOf(q) >= 0; }).slice(0, 12).map(function (d) { return '<div class="chk" data-pick="' + d.id + '" style="cursor:pointer"><span style="flex:1">' + h(d.name) + '</span><span class="small muted">' + h(d.zone || '') + ' ' + h(d.area || '') + '</span></div>'; }).join('') || '<p class="small muted">Nahi mila. Naya dealer add karein.</p>';
       Array.prototype.forEach.call(document.querySelectorAll('[data-pick]'), function (e) { e.onclick = function () { sel = list.filter(function (d) { return d.id === Number(e.dataset.pick); })[0]; $('dres').innerHTML = ''; $('ds').value = ''; if ($('nd')) { $('nd').checked = false; $('ndf').classList.add('hidden'); } showSel(); }; }); };
     if ($('nd')) $('nd').onchange = function () { $('ndf').classList.toggle('hidden', !this.checked); if (this.checked) { sel = null; showSel(); $('ndn').value = val('ds'); } };
@@ -991,11 +1104,13 @@ function vDash(v) {
       '<div class="grid4">' + S.m.stages.map(function (s) { return '<div class="kpi"><b>' + (d.counts[s] || 0) + '</b><span>' + h(stageLbl(s)) + '</span></div>'; }).join('') + '<div class="kpi"><b class="short">' + (d.counts.punch_pending || 0) + '</b><span>Trylo: punching baaki</span></div><div class="kpi"><b class="short">' + d.counts.hold + '</b><span>HOLD</span></div><div class="kpi"><b>' + d.unmatched + '</b><span>Unmatched bills</span></div></div>' +
       '<div class="card" style="margin-top:12px"><h3>Source wise (last 30 din)</h3><div class="grid4">' + Object.keys(d.sources || {}).map(function (k) { return '<div class="kpi"><b>' + d.sources[k] + '</b><span>' + h(k) + '</span></div>'; }).join('') + '</div></div>' +
       '<div class="card" style="margin-top:12px"><div class="row"><h3>Pending to bill (' + d.pending.length + ')</h3><button class="sm" id="e1">CSV</button></div>' + table(d.pending, [['id', 'Tracking no', function (x, r) { return '<a href="#/o/' + x + '"><b>' + h(r.track_no || '-') + '</b></a>'; }], ['order_no', 'Order'], ['source', 'Source', function (x, r) { return h(x) + (r.priority === 'Urgent' ? ' <span class="short">URGENT</span>' : ''); }], ['dealer_name', 'Dealer'], ['zone', 'Zone'], ['area', 'Area'], ['reason', 'Reason', function (x, r) { return r.hold ? '<span class="short">' + h(x) + '</span>' : h(x); }], ['age_days', 'Age (din)'], ['pcs', 'Pcs', pcs]]) + '</div>' +
+      (function (pl) { pl = d.pending_left || { count: 0, remaining: 0, orders: [] }; return '<div class="card" style="margin-top:12px"><div class="row"><h3>Pending leftover — purane order (' + (pl.count || 0) + ')</h3><button class="sm" id="e5">CSV</button></div><p class="small muted">Pehli fulfillment ke baad baaki qty, dispatched orders included. Combined baaki <b>' + pcs(pl.remaining) + '</b>. <a href="#/q">Meri queue → Pending leftover</a></p>' + (pl.orders && pl.orders.length ? table(pl.orders, [['id', 'Tracking no', function (x, r) { return '<a href="#/o/' + x + '"><b>' + h(r.track_no || ono(r)) + '</b></a>'; }], ['dealer_name', 'Dealer', function (x, r) { return '<a href="' + dealerHref(r) + '">' + h(x) + '</a>'; }], ['order_date', 'Order date', dmy], ['stage', 'Stage', stageLbl], ['pending_qty', 'Baaki pcs', pcs]]) : '<p class="muted small">Koi leftover pending nahi.</p>') + '</div>'; })() +
       '<div class="card"><div class="row"><h3>Aaj ka dispatch by vehicle</h3><button class="sm" id="e2">CSV</button></div>' + table(d.dispatch, [['vehicle', 'Vehicle / mode'], ['orders', 'Orders'], ['dispatched', 'Dispatched'], ['boxes', 'Boxes'], ['pcs', 'Pcs', pcs], ['dealers', 'Dealers', function (x) { return h(x.join(', ')); }]]) + '</div>' +
       '<div class="card"><div class="row"><h3>Efficiency (last 30 din, avg time per step)</h3><button class="sm" id="e3">CSV</button></div>' + table(d.efficiency, [['step', 'Step'], ['person', 'Kisne'], ['orders', 'Orders'], ['avg_min', 'Avg', mins], ['max_min', 'Max', mins]]) + '</div>';
     $('day').onchange = function () { LS.setItem('imw_day', this.value); vDash(v); };
     $('e1').onclick = function () { csv(d.pending, 'pending-to-bill'); }; $('e2').onclick = function () { csv(d.dispatch.map(function (r) { return Object.assign({}, r, { dealers: r.dealers.join(' | ') }); }), 'dispatch-' + day); }; $('e3').onclick = function () { csv(d.efficiency, 'efficiency'); };
     $('e4').onclick = function () { csv(sl.delayed.map(function (r) { return { tracking_no: r.track_no, order: r.order_no || r.id, dealer: r.dealer_name, source: r.source, received: tm(r.received_at), deadline: tm(r.deadline), billed: r.billed_at ? tm(r.billed_at) : 'pending', delay_min: r.delay_min }; }), 'delayed-orders'); };
+    if ($('e5')) $('e5').onclick = function () { var pl = d.pending_left || { orders: [] }; csv((pl.orders || []).map(function (r) { return { tracking_no: r.track_no, order: r.order_no || r.id, dealer: r.dealer_name, order_date: r.order_date, stage: r.stage, pending_qty: r.pending_qty }; }), 'pending-leftover'); };
   }).catch(fail);
 }
 
