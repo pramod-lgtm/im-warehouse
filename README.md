@@ -61,7 +61,7 @@ Every order must be billed within `sla_hours` of being received (Sales Tracker v
 ## Pending leftover (old order)
 When a dealer's earlier order was only partly fulfilled (short pick / billed less than ordered), the leftover quantity stays on **that old order**. Do not raise a new order just to execute that pending.
 
-Warehouse manager (or admin): tap the **dealer name** in Meri queue, review orders with leftover pending, open the order, tap **Pending executed**, and enter the date, brand/item quantity, bill/invoice no, and an optional photo. Each save is a separate execution; remaining pending reduces automatically and the order is marked **Pending complete** at zero. Execution history is on the order page.
+Warehouse manager (or admin): tap the **dealer name** in Meri queue, review orders with leftover pending, open the order, tap **Pending executed**, enter the leftover qty and assign a **picker**. That same order (leftover lines only) goes back to the picking stage of Meri queue, then through checking and billing as usual. Each cycle is logged (date, qty, picker, and the bill no once billed). Remaining pending reduces after pick/bill; at zero the order is marked **Pending complete**. The original invoice / first pick is not overwritten. Execution history is on the order page.
 
 Meri queue also has a **Pending leftover** chip (includes already dispatched orders). If a new order arrives for a dealer who still has older leftover pending, a warning is shown on the queue card, the order page, and New order. This is separate from **Pending for billing** (orders not yet billed).
 

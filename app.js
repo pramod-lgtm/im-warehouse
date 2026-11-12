@@ -286,37 +286,36 @@ function qRange(k, d1, d2) {
 }
 function leftoverCard(o) {
   var lines = (o.pending_lines || []).filter(function (l) { return Number(l.remaining) > 0; }).map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ' ' + pcs(l.remaining); }).join(' + ');
-  var btn = can('pendingexec') && o.pending_status === 'open' ? ' <button type="button" class="sm primary" data-pex="' + o.id + '">Pending executed</button>' : '';
-  return '<div class="card">' + cardInner(o) + '<div class="small">Baaki: <b>' + pcs(o.pending_qty) + '</b>' + (lines ? ' • ' + lines : '') + btn + '</div></div>';
+  var cyc = o.pending_cycle_info || (Number(o.pending_cycle) ? { cycle_status: o.stage, picker_name: o.picker_name } : null);
+  var btn = can('pendingexec') && o.pending_status === 'open' && !cyc ? ' <button type="button" class="sm primary" data-pex="' + o.id + '">Pending executed</button>' : '';
+  var cycNote = cyc ? ' • <span class="short">Cycle chal raha: ' + h(stageLbl(o.stage)) + (cyc.picker_name ? ' • picker ' + h(cyc.picker_name) : '') + '</span>' : '';
+  return '<div class="card">' + cardInner(o) + '<div class="small">Baaki: <b>' + pcs(o.pending_qty) + '</b>' + (lines ? ' • ' + lines : '') + cycNote + btn + '</div></div>';
 }
 function pendingExecFormHtml(o) {
   var rows = (o.pending_lines || []).map(function (l) {
     var rem = Number(l.remaining) || 0;
     return '<div class="row" style="margin:6px 0;align-items:center"><div style="flex:1"><b>' + h(l.brand) + (l.item ? ' ' + h(l.item) : '') + '</b><div class="small muted">Baaki ' + pcs(rem) + (l.opening != null ? ' / opening ' + pcs(l.opening) : '') + '</div></div>' +
-      (rem > 0 ? '<input class="pexq" data-line="' + h(l.line_id) + '" type="number" min="0" max="' + rem + '" placeholder="0" style="width:90px;flex:0">' : '<span class="small muted">0</span>') + '</div>';
+      (rem > 0 ? '<input class="pexq" data-line="' + h(l.line_id) + '" type="number" min="0" max="' + rem + '" value="' + rem + '" style="width:90px;flex:0">' : '<span class="small muted">0</span>') + '</div>';
   }).join('') || '<p class="muted small">Line-wise pending nahi mila — total baaki ' + pcs(o.pending_qty) + '</p>';
-  return '<div id="pexbox"><h3>Pending executed — ' + trk(o) + h(ono(o)) + ' ' + h(o.dealer_name) + '</h3><p class="small muted">Yeh purane order ke leftover pending par jayega, naya order nahi banega. Baaki: <b>' + pcs(o.pending_qty) + '</b></p>' +
-    '<label>Executed date</label><input type="date" id="pexd" value="' + h(today()) + '">' +
-    '<div style="margin-top:8px"><b>Quantity (brand / item)</b>' + rows + '</div>' +
-    '<div class="grid2" style="margin-top:8px"><div><label>Bill / invoice no</label><input id="pexi" placeholder="Invoice no"></div><div><label>Note (optional)</label><input id="pexn"></div></div>' +
-    '<label style="margin-top:8px">Photo (optional)</label><input type="file" id="pexf" accept="image/*" capture="environment"><div class="small muted" id="pexs"></div><img id="pexv" style="max-width:160px;max-height:160px;display:none;margin-top:6px;border:1px solid var(--line)">' +
-    '<button class="primary big" id="pexsav" style="margin-top:12px">Save pending executed</button></div>';
+  return '<div id="pexbox"><h3>Pending executed — ' + trk(o) + h(ono(o)) + ' ' + h(o.dealer_name) + '</h3><p class="small muted">Yahi purana order (sirf leftover qty) picking queue mein wapas jayega. Naya order nahi banega. Baaki: <b>' + pcs(o.pending_qty) + '</b>. Bill invoice baad mein billing step par lagega.</p>' +
+    whoSel('pex_picker', 'picker', '', 'Picker chunein') +
+    '<label>Date</label><input type="date" id="pexd" value="' + h(today()) + '">' +
+    '<div style="margin-top:8px"><b>Leftover quantity (brand / item) — itni qty pick ke liye jaayegi</b>' + rows + '</div>' +
+    '<label style="margin-top:8px">Note (optional)</label><input id="pexn">' +
+    '<button class="primary big" id="pexsav" style="margin-top:12px">Picker assign karke picking par bhejein</button></div>';
 }
 function bindPendingExecForm(o, ondone) {
-  var photo = null;
-  if ($('pexf')) $('pexf').onchange = function () {
-    var f = this.files && this.files[0]; if (!f) return;
-    compressImg(f).then(function (ph) { photo = ph; $('pexv').src = ph.url; $('pexv').style.display = ''; $('pexs').textContent = 'Ready (' + Math.round(ph.b64.length * 0.75 / 1024) + ' KB)'; }).catch(fail);
-  };
   $('pexsav').onclick = function () {
     var lines = [];
     Array.prototype.forEach.call(document.querySelectorAll('.pexq'), function (i) { if (i.value !== '' && isFinite(Number(i.value)) && Number(i.value) > 0) lines.push({ line_id: i.getAttribute('data-line'), qty: Number(i.value) }); });
-    if (!lines.length) return toast('Kam se kam ek quantity daalein', 'err');
-    var d = { order_id: o.id, exec_date: val('pexd'), invoice_no: val('pexi'), note: val('pexn'), lines: lines };
-    if (photo) { d.b64 = photo.b64; d.mime = photo.mime; }
-    if (!confirm('Is pending ko purane order ' + (o.track_no || ono(o) || ('#' + o.id)) + ' par record karein?')) return;
+    if (!lines.length) return toast('Kam se kam ek leftover quantity daalein', 'err');
+    var pickerName = whoVal('pex_picker'); if (!pickerName) return toast('Picker chunein', 'err');
+    var pu = (S.m.users || []).filter(function (u) { return u.name === pickerName; })[0];
+    var d = { order_id: o.id, exec_date: val('pexd'), picker_name: pickerName, note: val('pexn'), lines: lines };
+    if (pu) d.picker_id = pu.id;
+    if (!confirm(pickerName + ' ko is purane order ki leftover qty pick karne ke liye assign karein? Order Meri queue ki picking mein chala jayega.')) return;
     call('savePendingExec', d).then(function (r) {
-      toast(r.status === 'complete' ? 'Pending complete ✔' : 'Save ho gaya • baaki ' + pcs(r.remaining));
+      toast('Picking par bhej diya • ' + h(r.picker_name || pickerName) + ' • leftover ' + pcs(r.planned) + ' • baaki pick ke baad ghatagi');
       var sh = document.querySelector('.sheet'); if (sh) sh.remove();
       if (ondone) ondone(r);
     }).catch(function (e) { if (/Unknown action/i.test(String(e && e.message || e))) toast('Server update baaki hai — pehle naya Code.gs (v31) deploy karein', 'err'); else fail(e); });
@@ -324,6 +323,7 @@ function bindPendingExecForm(o, ondone) {
 }
 function openPendingExec(o, ondone) {
   if (!can('pendingexec')) return toast('Sirf warehouse manager pending execute kar sakte hain', 'err');
+  if (o.pending_cycle || (o.pending_cycle_info && o.pending_cycle_info.cycle_status && o.pending_cycle_info.cycle_status !== 'billed')) return toast('Yeh order pehle se picking / billing cycle mein hai', 'err');
   if (o.pending_status !== 'open' || !(Number(o.pending_qty) > 0)) return toast('Is order par leftover pending nahi hai', 'err');
   if (!(o.pending_lines && o.pending_lines.length)) {
     return call('order', { id: o.id }).then(function (r) { openPendingExec(r.order, ondone); }).catch(fail);
@@ -401,7 +401,7 @@ function vQueue(v) {
       if (qs === 'pending_left') {
         var lo = ((left && left.orders) || []).filter(function (o) { return qDealerOk(o, dq); });
         $('qn').textContent = lo.length;
-        $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : '') + '<b>' + lo.length + '</b> orders with leftover pending, <b>' + pcs((dq ? lo : (left && left.orders) || []).reduce(function (a, o) { return a + (Number(o.pending_qty) || 0); }, 0)) + ' baaki</b>. Purane order par record karein — naya order nahi.';
+        $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : '') + '<b>' + lo.length + '</b> orders with leftover pending, <b>' + pcs((dq ? lo : (left && left.orders) || []).reduce(function (a, o) { return a + (Number(o.pending_qty) || 0); }, 0)) + ' baaki</b>. Pending executed se yahi order picking queue mein wapas jaata hai — naya order nahi.';
         $('qlst').innerHTML = lo.length ? lo.map(leftoverCard).join('') : '<div class="card center muted">Koi leftover pending nahi.</div>';
         Array.prototype.forEach.call(v.querySelectorAll('[data-pex]'), function (b) { b.onclick = function () { var id = Number(b.getAttribute('data-pex')); var o = lo.filter(function (x) { return Number(x.id) === id; })[0]; if (o) openPendingExec(o, function () { vQueue(v); }); }; });
         return;
@@ -412,7 +412,7 @@ function vQueue(v) {
       var pendHead = '';
       if (dq && dealerPend) {
         var openP = dealerPend.open || [];
-        if (openP.length) pendHead = '<div class="card" style="border-color:var(--danger, #c0392b)"><h3>Is dealer ke leftover pending (' + openP.length + ')</h3><p class="small muted">Pehle order ki baaki qty yahan record karein. Combined baaki <b>' + pcs(dealerPend.remaining) + '</b>.</p>' + openP.map(leftoverCard).join('') + '</div>';
+        if (openP.length) pendHead = '<div class="card" style="border-color:var(--danger, #c0392b)"><h3>Is dealer ke leftover pending (' + openP.length + ')</h3><p class="small muted">Pending executed se yahi order picking par jaayega. Combined baaki <b>' + pcs(dealerPend.remaining) + '</b>.</p>' + openP.map(leftoverCard).join('') + '</div>';
       }
       $('qn').textContent = f.length + (r || dq || qs ? ' / ' + list.length : '');
       $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : 'Sab: ') + '<b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>' +
@@ -648,24 +648,35 @@ var STEPS = [['punch', 'punched_at', 'punched_by', 'Order Punching (Trylo)'], ['
 var STEP_ROLES = { punch: ['admin', 'warehouse_manager', 'biller', 'coordinator'], allocate: ['admin', 'warehouse_manager'], pick: ['admin', 'warehouse_manager', 'picker'], check: ['admin', 'warehouse_manager', 'checker'], bill: ['admin', 'warehouse_manager', 'biller'], pack: ['admin', 'warehouse_manager', 'packer'], dispatch: ['admin', 'warehouse_manager', 'dispatch'] };
 function nextStep(o) { return o.stage === 'new' && Number(o.needs_punch) ? 'punch' : NEXT[o.stage]; }
 var NEXT = { new: 'allocate', punched: 'allocate', allocated: 'pick', picked: 'check', checked: 'bill', billed: 'pack', packed: 'dispatch' };
+function pendingCycleOf(o) {
+  if (o.pending_cycle_info && o.pending_cycle_info.cycle_status && o.pending_cycle_info.cycle_status !== 'billed' && o.pending_cycle_info.cycle_status !== 'complete') return o.pending_cycle_info;
+  var list = o.pending_execs || [];
+  for (var i = list.length - 1; i >= 0; i--) {
+    var st = list[i].cycle_status;
+    if (st && st !== 'billed' && st !== 'complete' && st !== 'packed' && st !== 'dispatched') return list[i];
+  }
+  return Number(o.pending_cycle) ? { cycle_status: o.stage, picker_name: o.picker_name, planned_qty: o.pending_qty, qty: 0 } : null;
+}
 function pendingExecCard(o) {
   var p = o.pending || { remaining: o.pending_qty, status: o.pending_status, lines: o.pending_lines || [] };
+  var cyc = pendingCycleOf(o);
   var hist = (o.pending_execs || []).map(function (g) {
-    var ls = (g.lines || []).map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ' ' + pcs(l.qty); }).join(' + ');
-    var ph = g.photo_id ? ' <button type="button" class="sm" data-pexph="' + h(g.lines[0] && g.lines[0].id || '') + '">Photo</button>' : '';
-    return '<div class="small" style="margin:6px 0"><b>' + h(dmy(g.exec_date)) + '</b> • ' + pcs(g.qty) + (g.invoice_no ? ' • Inv ' + h(g.invoice_no) : '') + ' • ' + h(g.by_name || '') + ph + '<div class="muted">' + ls + (g.note ? ' • ' + h(g.note) : '') + '</div></div>';
-  }).join('') || '<p class="muted small">Abhi koi pending execution nahi.</p>';
+    var ls = (g.lines || []).map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ' ' + pcs(l.qty || l.planned_qty); }).join(' + ');
+    var st = g.cycle_status === 'allocated' ? 'picking baaki' : g.cycle_status === 'picked' || g.cycle_status === 'checked' ? 'bill baaki' : g.invoice_no ? ('Inv ' + g.invoice_no) : '';
+    return '<div class="small" style="margin:6px 0"><b>' + h(dmy(g.exec_date)) + '</b> • ' + pcs(g.qty || g.planned_qty) + (g.picker_name ? ' • picker ' + h(g.picker_name) : '') + (st ? ' • ' + h(st) : '') + '<div class="muted">' + ls + (g.note ? ' • ' + h(g.note) : '') + '</div></div>';
+  }).join('') || '<p class="muted small">Abhi koi pending cycle nahi.</p>';
   var status = p.status === 'complete' ? '<span class="pill" style="background:#e6f4ea;color:#1e7e34">Pending complete</span>' : (p.status === 'open' && Number(p.remaining) > 0 ? '<span class="pill st-hold">Baaki ' + pcs(p.remaining) + '</span>' : '');
   if (!p.status && !(o.pending_execs || []).length) return pendingWarnHtml(o);
-  var btn = can('pendingexec') && p.status === 'open' && Number(p.remaining) > 0 ? '<button class="primary" id="pexbtn" style="margin-top:8px">Pending executed</button>' : '';
+  var btn = can('pendingexec') && p.status === 'open' && Number(p.remaining) > 0 && !cyc ? '<button class="primary" id="pexbtn" style="margin-top:8px">Pending executed</button>' : '';
+  var cycMsg = cyc ? '<p class="small short">Ab yeh order Meri queue mein hai: <b>' + h(stageLbl(o.stage)) + '</b>' + (cyc.picker_name ? ' • picker ' + h(cyc.picker_name) : '') + '. Normal tarike se pick, check, phir bill karein. Invoice is cycle par lagega; pehla invoice nahi badlega.</p>' : '';
   var warn = pendingWarnHtml(o);
-  return warn + '<div class="card"><h3>Pending leftover</h3><p class="small">Pehli fulfillment ke baad jo qty baaki thi, usko yahan purane order par record karein (naya order nahi). ' + status + '</p>' +
-    ((p.lines || []).length ? '<div class="small">' + p.lines.map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ': baaki ' + pcs(l.remaining) + (l.opening != null ? ' (opening ' + pcs(l.opening) + ')' : ''); }).join('<br>') + '</div>' : '') +
+  return warn + '<div class="card"><h3>Pending leftover</h3><p class="small">Pehli fulfillment ke baad baaki qty isi purane order par pick / bill hoti hai (naya order nahi). ' + status + '</p>' + cycMsg +
+    ((p.lines || []).length ? '<div class="small">' + p.lines.map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ': baaki ' + pcs(l.remaining) + (l.opening != null ? ' (opening ' + pcs(l.opening) : '') + (l.opening != null ? ')' : ''); }).join('<br>') + '</div>' : '') +
     btn + '<h3 style="margin-top:12px">Execution history</h3>' + hist + '</div>';
 }
 function vOrder(v, id) {
   call('order', { id: id }).then(function (r) {
-    var o = r.order, manEdit = canNew() && /^W-/.test(o.src_id) && o.stage !== 'cancelled' && !o.invoice_no && S.m.stages.indexOf(o.stage) < S.m.stages.indexOf('billed'), nx = nextStep(o), mine = nx && STEP_ROLES[nx].indexOf(role()) >= 0 && !Number(o.hold), si = S.m.stages.indexOf(o.stage);
+    var o = r.order, cyc = pendingCycleOf(o), manEdit = canNew() && /^W-/.test(o.src_id) && o.stage !== 'cancelled' && !o.invoice_no && S.m.stages.indexOf(o.stage) < S.m.stages.indexOf('billed'), nx = nextStep(o), mine = nx && STEP_ROLES[nx].indexOf(role()) >= 0 && !Number(o.hold), si = S.m.stages.indexOf(o.stage);
     var tl = '<ul class="tl"><li class="done"><b>Order aaya</b> <span class="small muted">' + h(dmy(o.order_date)) + ' • ' + h(o.salesman) + ' (' + (/^W-/.test(o.src_id) ? h(srcOf(o)) + ', liya ' + h(o.taken_by) : 'Sales Tracker #' + h(o.src_id)) + ')</span></li>' + STEPS.filter(function (s) { return s[0] !== 'punch' || Number(o.needs_punch) || o.punched_at; }).map(function (s) {
       var done = !!o[s[1]], extra = '', i = S.m.stages.indexOf({ punch: 'new', allocate: 'punched', pick: 'allocated', check: 'picked', bill: 'checked', pack: 'billed', dispatch: 'packed' }[s[0]]);
       if (s[0] === 'allocate' && !Number(o.needs_punch) && o.stage === 'new') i = si;
@@ -677,16 +688,22 @@ function vOrder(v, id) {
       if (s[0] === 'dispatch' && o.delivery_mode) extra = ' • ' + h(o.delivery_mode) + ' ' + h(o.vehicle) + ' • ' + h(o.payment_mode) + ' • ' + h(dmy(o.dispatch_date));
       return '<li class="' + (done ? 'done' : (i === si ? 'now' : '')) + '"><b>' + s[3] + '</b>' + extra + '<div class="small muted">' + (done ? tm(o[s[1]]) + ' • ' + (nm && s[0] !== 'allocate' ? 'Done by <b>' + h(nm) + '</b> (login: ' + h(o[s[2]]) + ')' : h(o[s[2]])) : 'Pending' + (nm && s[0] !== 'allocate' ? ' • assigned ' + h(nm) : '')) + '</div></li>';
     }).join('') + '</ul>';
-    var lines = '<div class="tw"><table><tr><th>Brand / item</th><th>Order (pcs)</th><th>Picked (pcs)</th><th>Short</th></tr>' + o.lines.map(function (l) {
+    var planBy = {};
+    if (cyc) (cyc.lines || []).forEach(function (l) { planBy[String(l.line_id)] = (l.planned_qty !== '' && l.planned_qty != null) ? Number(l.planned_qty) : Number(l.qty || 0); });
+    var lines = '<div class="tw"><table><tr><th>Brand / item</th><th>Order (pcs)</th><th>Picked (pcs)</th><th>Short</th>' + (cyc ? '<th>Is cycle leftover</th>' : '') + '</tr>' + o.lines.map(function (l) {
       var sh = l.picked_qty !== '' && l.ordered_qty !== '' ? Math.max(0, l.ordered_qty - l.picked_qty) : '';
-      return '<tr><td>' + h(l.brand) + (l.item ? ' ' + h(l.item) : '') + '</td><td>' + (isMgr() && o.stage !== 'dispatched' && !o.picked_at ? '<input class="oq" data-id="' + l.id + '" type="number" min="0" value="' + h(l.ordered_qty) + '" style="width:80px;padding:6px">' : h(l.ordered_qty)) + '</td><td>' +
-        (nx === 'pick' && mine ? '<input class="pq" data-id="' + l.id + '" type="number" min="0" value="' + h(l.ordered_qty) + '" style="width:80px;padding:6px">' : h(l.picked_qty)) + '</td><td class="short">' + (sh || '') + '</td></tr>';
-    }).join('') + '<tr><th>Total</th><th>' + pcs(o.pcs) + '</th><th>' + (o.picked_at ? pcs(o.picked_qty) : '') + '</th><th></th></tr></table></div>' + (isMgr() && !o.picked_at ? '<button class="sm" id="saveq">Order qty save</button>' : '');
+      var plan = planBy[String(l.id)];
+      var pickVal = cyc ? (plan || 0) : l.ordered_qty;
+      var pickCell = (nx === 'pick' && mine && (!cyc || plan > 0)) ? '<input class="pq" data-id="' + l.id + '" type="number" min="0"' + (cyc ? ' max="' + plan + '"' : '') + ' value="' + h(pickVal) + '" style="width:80px;padding:6px">' : (cyc && plan > 0 ? h(plan) : h(l.picked_qty));
+      return '<tr><td>' + h(l.brand) + (l.item ? ' ' + h(l.item) : '') + '</td><td>' + (isMgr() && o.stage !== 'dispatched' && !o.picked_at && !cyc ? '<input class="oq" data-id="' + l.id + '" type="number" min="0" value="' + h(l.ordered_qty) + '" style="width:80px;padding:6px">' : h(l.ordered_qty)) + '</td><td>' +
+        pickCell + '</td><td class="short">' + (sh || '') + '</td>' + (cyc ? '<td>' + (plan > 0 ? pcs(plan) : '—') + '</td>' : '') + '</tr>';
+    }).join('') + '<tr><th>Total</th><th>' + pcs(o.pcs) + '</th><th>' + (o.picked_at ? pcs(o.picked_qty) : '') + '</th><th></th>' + (cyc ? '<th>' + pcs(cyc.planned_qty || cyc.qty) + '</th>' : '') + '</tr></table></div>' + (isMgr() && !o.picked_at && !cyc ? '<button class="sm" id="saveq">Order qty save</button>' : '') +
+      (cyc ? '<p class="small muted" style="margin-top:6px">Leftover cycle: pehli pick qty (upar) same rehti hai. Is cycle mein sirf leftover column pick hota hai.</p>' : '');
     var act = '';
     if (mine) {
       if (nx === 'allocate') act = '<div class="grid2"><div>' + whoSel('w_picker', 'picker', o.picker_name, 'Pick kaun karega') + '</div><div>' + whoSel('w_checker', 'checker', o.checker_name, 'Check kaun karega') + '</div><div>' + whoSel('w_biller', 'biller', o.biller_name, 'Bill kaun karega') + '</div><div>' + whoSel('w_packer', 'packer', o.packer_name, 'Pack kaun karega') + '</div></div>';
       else act = whoSel('w_done', STEP_ROLE[nx][0], o[STEP_ROLE[nx][1]] || (role() === STEP_ROLE[nx][0] ? S.user.name : ''), 'Kisne kiya (naam)');
-      if (nx === 'bill') act += '<div class="grid2"><div><label>Invoice no</label><input id="inv"></div><div><label>Billed qty (pcs)</label><input id="bq" type="number" value="' + h(o.picked_qty) + '"></div></div>';
+      if (nx === 'bill') act += '<div class="grid2"><div><label>Invoice no' + (cyc ? ' (is leftover cycle ka)' : '') + '</label><input id="inv"></div><div><label>Billed qty (pcs)</label><input id="bq" type="number" value="' + h(cyc ? (cyc.qty || cyc.planned_qty) : o.picked_qty) + '"></div></div>' + (cyc && o.invoice_no ? '<p class="small muted">Pehla invoice ' + h(o.invoice_no) + ' nahi badlega. Yeh naya bill is cycle par lagega.</p>' : '');
       if (nx === 'pack') act += '<label>Kitne boxes</label><input id="bx" type="number" min="1">';
       act += '<button class="good big" id="stepb" style="margin-top:10px">✔ ' + STEPS.filter(function (s) { return s[0] === nx; })[0][3] + ' confirm</button>';
     }
@@ -700,7 +717,7 @@ function vOrder(v, id) {
       '<div class="small muted">Source: ' + h(srcOf(o)) + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.salesman ? ' • salesman: ' + h(o.salesman) : '') + (o.expected_date ? ' • expected dispatch ' + h(dmy(o.expected_date)) : '') + (o.edited_at ? ' • edited ' + tm(o.edited_at) + ' ' + h(o.edited_by) : '') + '</div>' +
       (o.stage === 'cancelled' ? '<div class="short">Cancel: ' + h(o.cancel_reason) + ' (' + tm(o.cancelled_at) + ', ' + h(o.cancelled_by) + ')</div>' : '') +
       (manEdit ? '<div class="row" style="margin-top:8px"><a class="btn sm" href="#/' + (isStore(o) ? 'sq/' : '') + 'edit/' + o.id + '">✏️ Edit</a><button class="sm danger" id="cnl">Cancel order</button></div>' : '') + '</div>' +
-      (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + dupCard(o, r.dup_orders) + (o.merged_into ? '<div class="card short">Ye order duplicate tha, <a href="#/o/' + h(o.merged_into) + '">' + h((o.merged_into_order && (o.merged_into_order.track_no || o.merged_into_order.order_no)) || '#' + o.merged_into) + '</a> mein merge hua (' + tm(o.merged_at) + ', ' + h(o.merged_by) + ')</div>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + tl + act + '</div>' + pendingExecCard(o) + waitCard(o) + planCard(o) + hold + del + nb;
+      (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + dupCard(o, r.dup_orders) + (o.merged_into ? '<div class="card short">Ye order duplicate tha, <a href="#/o/' + h(o.merged_into) + '">' + h((o.merged_into_order && (o.merged_into_order.track_no || o.merged_into_order.order_no)) || '#' + o.merged_into) + '</a> mein merge hua (' + tm(o.merged_at) + ', ' + h(o.merged_by) + ')</div>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + (cyc ? '<p class="small short">Leftover cycle chal raha hai — ab ' + h(stageLbl(o.stage)) + (cyc.picker_name ? ', picker ' + h(cyc.picker_name) : '') + '. Pehli pick / bill history same rehti hai.</p>' : '') + tl + act + '</div>' + pendingExecCard(o) + waitCard(o) + planCard(o) + hold + del + nb;
     var b = $('stepb'); if (b) b.onclick = function () {
       var d = { id: o.id, action: nx };
       if (nx === 'allocate') {
@@ -1104,7 +1121,7 @@ function vDash(v) {
       '<div class="grid4">' + S.m.stages.map(function (s) { return '<div class="kpi"><b>' + (d.counts[s] || 0) + '</b><span>' + h(stageLbl(s)) + '</span></div>'; }).join('') + '<div class="kpi"><b class="short">' + (d.counts.punch_pending || 0) + '</b><span>Trylo: punching baaki</span></div><div class="kpi"><b class="short">' + d.counts.hold + '</b><span>HOLD</span></div><div class="kpi"><b>' + d.unmatched + '</b><span>Unmatched bills</span></div></div>' +
       '<div class="card" style="margin-top:12px"><h3>Source wise (last 30 din)</h3><div class="grid4">' + Object.keys(d.sources || {}).map(function (k) { return '<div class="kpi"><b>' + d.sources[k] + '</b><span>' + h(k) + '</span></div>'; }).join('') + '</div></div>' +
       '<div class="card" style="margin-top:12px"><div class="row"><h3>Pending to bill (' + d.pending.length + ')</h3><button class="sm" id="e1">CSV</button></div>' + table(d.pending, [['id', 'Tracking no', function (x, r) { return '<a href="#/o/' + x + '"><b>' + h(r.track_no || '-') + '</b></a>'; }], ['order_no', 'Order'], ['source', 'Source', function (x, r) { return h(x) + (r.priority === 'Urgent' ? ' <span class="short">URGENT</span>' : ''); }], ['dealer_name', 'Dealer'], ['zone', 'Zone'], ['area', 'Area'], ['reason', 'Reason', function (x, r) { return r.hold ? '<span class="short">' + h(x) + '</span>' : h(x); }], ['age_days', 'Age (din)'], ['pcs', 'Pcs', pcs]]) + '</div>' +
-      (function (pl) { pl = d.pending_left || { count: 0, remaining: 0, orders: [] }; return '<div class="card" style="margin-top:12px"><div class="row"><h3>Pending leftover — purane order (' + (pl.count || 0) + ')</h3><button class="sm" id="e5">CSV</button></div><p class="small muted">Pehli fulfillment ke baad baaki qty, dispatched orders included. Combined baaki <b>' + pcs(pl.remaining) + '</b>. <a href="#/q">Meri queue → Pending leftover</a></p>' + (pl.orders && pl.orders.length ? table(pl.orders, [['id', 'Tracking no', function (x, r) { return '<a href="#/o/' + x + '"><b>' + h(r.track_no || ono(r)) + '</b></a>'; }], ['dealer_name', 'Dealer', function (x, r) { return '<a href="' + dealerHref(r) + '">' + h(x) + '</a>'; }], ['order_date', 'Order date', dmy], ['stage', 'Stage', stageLbl], ['pending_qty', 'Baaki pcs', pcs]]) : '<p class="muted small">Koi leftover pending nahi.</p>') + '</div>'; })() +
+      (function (pl) { pl = d.pending_left || { count: 0, remaining: 0, orders: [] }; return '<div class="card" style="margin-top:12px"><div class="row"><h3>Pending leftover — purane order (' + (pl.count || 0) + ')</h3><button class="sm" id="e5">CSV</button></div><p class="small muted">Pehli fulfillment ke baad baaki qty isi purane order par pick/bill hoti hai (dispatched included). Combined baaki <b>' + pcs(pl.remaining) + '</b>. <a href="#/q">Meri queue → Pending leftover</a></p>' + (pl.orders && pl.orders.length ? table(pl.orders, [['id', 'Tracking no', function (x, r) { return '<a href="#/o/' + x + '"><b>' + h(r.track_no || ono(r)) + '</b></a>'; }], ['dealer_name', 'Dealer', function (x, r) { return '<a href="' + dealerHref(r) + '">' + h(x) + '</a>'; }], ['order_date', 'Order date', dmy], ['stage', 'Stage', stageLbl], ['pending_qty', 'Baaki pcs', pcs]]) : '<p class="muted small">Koi leftover pending nahi.</p>') + '</div>'; })() +
       '<div class="card"><div class="row"><h3>Aaj ka dispatch by vehicle</h3><button class="sm" id="e2">CSV</button></div>' + table(d.dispatch, [['vehicle', 'Vehicle / mode'], ['orders', 'Orders'], ['dispatched', 'Dispatched'], ['boxes', 'Boxes'], ['pcs', 'Pcs', pcs], ['dealers', 'Dealers', function (x) { return h(x.join(', ')); }]]) + '</div>' +
       '<div class="card"><div class="row"><h3>Efficiency (last 30 din, avg time per step)</h3><button class="sm" id="e3">CSV</button></div>' + table(d.efficiency, [['step', 'Step'], ['person', 'Kisne'], ['orders', 'Orders'], ['avg_min', 'Avg', mins], ['max_min', 'Max', mins]]) + '</div>';
     $('day').onchange = function () { LS.setItem('imw_day', this.value); vDash(v); };
