@@ -78,3 +78,11 @@ A store order is identified only by **source = `Karwa Marketing Store`**. Wareho
 These orders do **not** appear in Meri queue (including Bill ho chuka and Pending leftover). They have their own Store orders queue that works the same way: pick / check / bill, leftover pending cycles, and billed orders under **Bill ho chuka** (last 7 bill days, newest first). The tab is in the bottom nav for every workflow role so the picker, checker and biller can run the same flow; warehouse manager and picker are the primary users. Admin and dispatch can still create a store order.
 
 Frontend sw **im-warehouse-v33**. Backend schema still **20**.
+
+
+## Performance
+Admin and warehouse manager: bottom nav **Performance** (`#/perf`). Retail Hub style team KPIs (orders received, punched, picked, checked, billed, packed, dispatched, with on-time % and average minutes) plus an individual table (orders, pcs, on-time count and %, average time, late, holds, cancellations). Filters: MTD, date range, specific date, role and person. CSV export.
+
+On time for punch / pick / check / bill uses the existing bill SLA deadline (receipt + sla_hours, cutoff / open / weekly off / holidays, or purchase grace). Pack and dispatch are operational: on time if finished on the same IST day the order was billed. Pending now and Late now are a live snapshot.
+
+Frontend sw **im-warehouse-v35**. Backend `Code_v35.gs` (paste + new version). Schema still **20** — no new columns.

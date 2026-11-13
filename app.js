@@ -82,7 +82,7 @@ function sheet(html) { var d = document.createElement('div'); d.className = 'she
 
 // ---------------- router
 function go(p) { if (location.hash !== '#' + p) location.hash = '#' + p; else route(); }
-var NAV = [['/q', '📋', 'Meri queue', null], ['/sq', '🛍️', 'Store orders', null], ['/all', '🏬', 'Sab orders', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
+var NAV = [['/q', '📋', 'Meri queue', null], ['/sq', '🛍️', 'Store orders', null], ['/all', '🏬', 'Sab orders', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/perf', '📈', 'Performance', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
 function nav(cur) {
   var n = $('nav'); if (!S.user) { n.classList.add('hidden'); return; }
   n.innerHTML = NAV.filter(function (x) { return !x[3] || can(x[3]); }).map(function (x) { return '<a href="#' + x[0] + '" class="' + (cur.indexOf(x[0]) === 0 ? 'on' : '') + '"><i>' + x[1] + '</i>' + x[2] + '</a>'; }).join('');
@@ -97,7 +97,7 @@ function route() {
   var raw = location.hash.slice(1) || '/q', p = raw.split('?')[0], v = $('view');
   if (p !== '/setup' && !S.token) p = '/login';
   $('who').textContent = S.user ? S.user.name + ' (' + S.user.role_label + ')' : '';
-  nav(p === '/login' || p === '/setup' ? p : raw.split('?')[0]); window.scrollTo(0, 0);
+  nav(p === '/login' || p === '/setup' ? p : raw.split('?')[0]); document.body.classList.toggle('hub-page', p === '/perf'); window.scrollTo(0, 0);
   if (p === '/login') return vLogin(v); if (p === '/setup') return vSetup(v);
   masters().then(function () {
     if (p.indexOf('/o/') === 0) return vOrder(v, Number(p.slice(3)));
@@ -106,7 +106,7 @@ function route() {
     if (p.indexOf('/sq/edit/') === 0) return call('order', { id: Number(p.slice(9)) }).then(function (r) { vStoreNew(v, r.order); }).catch(fail);
     if (p === '/sq') return vStoreQueue(v);
     if (p.indexOf('/edit/') === 0) return call('order', { id: Number(p.slice(6)) }).then(function (r) { if (isStore(r.order)) return go('/sq/edit/' + r.order.id); vNew(v, r.order); }).catch(fail);
-    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/kal': vKalDelivery, '/van': vVanPlan, '/dash': vDash, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList, '/dup': vDups }[p] || vQueue; f(v);
+    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/kal': vKalDelivery, '/van': vVanPlan, '/dash': vDash, '/perf': vPerf, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList, '/dup': vDups }[p] || vQueue; f(v);
   }).catch(fail);
 }
 window.addEventListener('hashchange', route);
@@ -1377,6 +1377,102 @@ function vDealers(v) {
 
 // ---------------- dashboard
 function table(rows, cols) { return '<div class="tw"><table><tr>' + cols.map(function (c) { return '<th>' + c[1] + '</th>'; }).join('') + '</tr>' + rows.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td>' + (c[2] ? c[2](r[c[0]], r) : h(r[c[0]])) + '</td>'; }).join('') + '</tr>'; }).join('') + '</table></div>'; }
+
+function hubPctClass(p) { if (p === '' || p == null) return ''; return p >= 90 ? 'hub-ok' : p >= 70 ? 'hub-warn' : 'hub-bad'; }
+function hubBar(p) { if (p === '' || p == null) return ''; var w = Math.max(0, Math.min(100, Number(p) || 0)); return '<div class="hub-bar"><i style="width:' + w + '%"></i></div>'; }
+function perfMode() {
+  var q = hashQuery();
+  return { mode: q.mode === 'range' || q.mode === 'day' ? q.mode : 'mtd', from: q.from || '', to: q.to || '', date: q.date || today(), role: q.role || '', person: q.person || '' };
+}
+function perfGo(patch) {
+  var c = Object.assign(perfMode(), patch || {}), q = ['mode=' + encodeURIComponent(c.mode)];
+  if (c.mode === 'range') {
+    q.push('from=' + encodeURIComponent(c.from || today().slice(0, 7) + '-01'));
+    q.push('to=' + encodeURIComponent(c.to || today()));
+  }
+  if (c.mode === 'day') q.push('date=' + encodeURIComponent(c.date || today()));
+  if (c.role) q.push('role=' + encodeURIComponent(c.role));
+  if (c.person) q.push('person=' + encodeURIComponent(c.person));
+  go('/perf?' + q.join('&'));
+}
+function vPerf(v) {
+  if (!isMgr()) return go('/q');
+  var f = perfMode(), payload = { mode: f.mode };
+  if (f.mode === 'range') { payload.from = f.from; payload.to = f.to; }
+  if (f.mode === 'day') payload.date = f.date;
+  call('performance', payload).then(function (d) { renderPerf(v, d, f); }).catch(function (e) {
+    if (/Unknown action/i.test((e && e.message) || '')) {
+      v.innerHTML = '<div class="hub"><div class="hub-hero"><div><div class="hub-kicker">IM Warehouse</div><h2>Performance</h2></div></div><div class="hub-card"><p>Yeh tab backend ke naye version (Code_v35) ke baad chalega. Apps Script mein <b>Code_v35.gs</b> paste karke deploy karein (Manage deployments, pencil, New version). Schema change nahi hai.</p></div></div>';
+      return;
+    }
+    fail(e);
+  });
+}
+function renderPerf(v, d, f) {
+  var team = d.team || {}, nows = d.now || {}, people = d.people || [], range = d.range || {};
+  var roles = ['', 'punch', 'picker', 'checker', 'biller', 'packer', 'dispatch', 'hold', 'cancel'];
+  var roleLbl = { '': 'Saari roles', punch: 'Punch', picker: 'Picker', checker: 'Checker', biller: 'Biller', packer: 'Packer', dispatch: 'Dispatch', hold: 'Hold', cancel: 'Cancel' };
+  var names = []; people.forEach(function (p) { if (names.indexOf(p.person) < 0) names.push(p.person); }); names.sort();
+  var shown = people.filter(function (p) { return (!f.role || p.role === f.role) && (!f.person || p.person === f.person); });
+  function stepCard(key, label, accent) {
+    var s = team[key] || { done: 0, pct: '', avg_min: '', late: 0, on_time: 0, pcs: 0 };
+    var sub = (s.pct === '' ? 'On-time —' : 'On-time ' + s.pct + '%') + (s.avg_min === '' ? '' : ' • Avg ' + mins(s.avg_min));
+    return '<div class="hub-kpi ' + (accent || '') + '"><div class="t">' + h(label) + '</div><div class="v">' + s.done + '</div><div class="s">' + sub + (s.pcs ? ' • ' + pcs(s.pcs) : '') + '</div>' + hubBar(s.pct === '' ? 0 : s.pct) + '</div>';
+  }
+  var period = dmy(range.from) + (range.from === range.to ? '' : ' se ' + dmy(range.to));
+  v.innerHTML = '<div class="hub">' +
+    '<div class="hub-hero"><div><div class="hub-kicker">IM Warehouse</div><h2>Performance</h2><div class="small muted" style="margin-top:4px">' + h(period) + '</div></div>' +
+    '<button class="sm hub-btn" id="px" style="flex:0">Export CSV</button></div>' +
+    '<div class="hub-controls">' +
+      '<div><label>Period</label><div class="hub-seg" id="pm">' +
+        [['mtd', 'MTD'], ['range', 'Date range'], ['day', 'Specific date']].map(function (x) { return '<button type="button" data-mode="' + x[0] + '" class="' + (f.mode === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('') +
+      '</div></div>' +
+      (f.mode === 'range' ? '<div><label>From</label><input type="date" id="pf" value="' + h(f.from || range.from || '') + '"></div><div><label>To</label><input type="date" id="pt" value="' + h(f.to || range.to || '') + '"></div>' : '') +
+      (f.mode === 'day' ? '<div><label>Date</label><input type="date" id="pd" value="' + h(f.date || range.from || today()) + '"></div>' : '') +
+      '<div><label>Role</label><select id="pr">' + roles.map(function (r) { return '<option value="' + h(r) + '"' + (f.role === r ? ' selected' : '') + '>' + h(roleLbl[r]) + '</option>'; }).join('') + '</select></div>' +
+      '<div><label>Person</label><select id="pp"><option value="">Sab log</option>' + names.map(function (n) { return '<option value="' + h(n) + '"' + (f.person === n ? ' selected' : '') + '>' + h(n) + '</option>'; }).join('') + '</select></div>' +
+    '</div>' +
+    '<div class="hub-kpis">' +
+      '<div class="hub-kpi"><div class="t">Orders received</div><div class="v">' + (team.received || 0) + '</div><div class="s">' + pcs(team.received_pcs || 0) + (team.cancelled ? ' • ' + team.cancelled + ' cancelled' : '') + (team.holds ? ' • ' + team.holds + ' holds' : '') + '</div></div>' +
+      stepCard('punch', 'Punched', 'hub-gold') + stepCard('pick', 'Picked', 'hub-gold') + stepCard('check', 'Checked') +
+      stepCard('bill', 'Billed', 'hub-good') + stepCard('pack', 'Packed') + stepCard('dispatch', 'Dispatched', 'hub-good') +
+      '<div class="hub-kpi hub-warnk"><div class="t">Pending now</div><div class="v">' + (nows.pending || 0) + '</div><div class="s">' + (nows.held ? nows.held + ' on hold' : 'Open in warehouse') + (nows.waiting ? ' • ' + nows.waiting + ' waiting stock' : '') + '</div></div>' +
+      '<div class="hub-kpi hub-danger"><div class="t">Late now</div><div class="v">' + (nows.late || 0) + '</div><div class="s">Open orders past bill deadline</div></div>' +
+    '</div>' +
+    '<div class="hub-card"><div class="hub-head"><h3>Individual performance</h3><span class="small muted">' + shown.length + ' rows</span></div>' +
+    (shown.length ? '<div class="tw"><table><thead><tr><th>Person</th><th>Role</th><th>Orders</th><th>Pcs</th><th>On time</th><th>Late</th><th>On-time %</th><th>Avg time</th><th>Holds</th><th>Cancels</th></tr></thead><tbody>' +
+      shown.map(function (p) {
+        var pct = p.pct === '' ? '—' : '<span class="hub-badge ' + hubPctClass(p.pct) + '">' + p.pct + '%</span>' + hubBar(p.pct);
+        return '<tr><td><strong>' + h(p.person) + '</strong></td><td>' + h(p.role_label || p.role) + '</td><td>' + p.orders + '</td><td>' + (p.pcs || 0).toLocaleString('en-IN') + '</td><td>' + p.on_time + '</td><td>' + (p.late ? '<span class="hub-badge hub-bad">' + p.late + '</span>' : '0') + '</td><td>' + pct + '</td><td>' + mins(p.avg_min) + '</td><td>' + (p.holds || 0) + '</td><td>' + (p.cancels || 0) + '</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<p class="muted small">Is period / filter mein koi row nahi.</p>') +
+    '</div>' +
+    '<div class="hub-card"><h3 style="margin-bottom:8px">On time ka matlab</h3>' +
+    '<p class="small muted">Official SLA bill tak hai: order aane ke <b>' + h((S.m && S.m.sla && S.m.sla.sla_hours) || 2) + ' ghante</b> ke andar bill hona chahiye. ' +
+    '<b>' + h((S.m && S.m.sla && S.m.sla.cutoff_time) || '17:00') + '</b> ke baad ya chhutti par aaya order: deadline agle working din <b>' + h((S.m && S.m.sla && S.m.sla.next_day_deadline) || '11:00') + '</b>. ' +
+    'Warehouse khulne se pehle aaya order: open time + SLA. Purchase wait par deadline ruki rehti hai, purchase ke baad grace hours milte hain. Delayed bill baad mein ho jaye tab bhi delayed hi gina jaata hai.</p>' +
+    '<p class="small muted" style="margin-top:8px">Is dashboard mein <b>Punch, Pick, Check, Bill</b> tab on time hain jab woh step bill ki deadline se pehle complete ho. <b>Pack aur Dispatch</b> official SLA mein nahi aate; yahan on time = bill wale IST din ke andar pack/dispatch. <b>Pending now</b> aur <b>Late now</b> aaj ki live list hain, period filter un par nahi lagta.</p>' +
+    slaHelp() + '</div></div>';
+  Array.prototype.forEach.call(document.querySelectorAll('#pm [data-mode]'), function (b) {
+    b.onclick = function () { perfGo({ mode: b.getAttribute('data-mode') }); };
+  });
+  if ($('pf')) $('pf').onchange = function () { perfGo({ from: val('pf'), to: val('pt') }); };
+  if ($('pt')) $('pt').onchange = function () { perfGo({ from: val('pf'), to: val('pt') }); };
+  if ($('pd')) $('pd').onchange = function () { perfGo({ date: val('pd') }); };
+  $('pr').onchange = function () { perfGo({ role: val('pr') }); };
+  $('pp').onchange = function () { perfGo({ person: val('pp') }); };
+  $('px').onclick = function () {
+    var rows = [
+      { kind: 'team', person: '', role: 'Received', orders: team.received || 0, pcs: team.received_pcs || 0, on_time: '', late: '', on_time_pct: '', avg_min: '', holds: team.holds || 0, cancels: team.cancelled || 0, pending_now: nows.pending || 0, late_now: nows.late || 0, period_from: range.from, period_to: range.to }
+    ].concat(['punch', 'pick', 'check', 'bill', 'pack', 'dispatch'].map(function (k) {
+      var s = team[k] || {};
+      return { kind: 'team', person: '', role: k, orders: s.done || 0, pcs: s.pcs || 0, on_time: s.on_time || 0, late: s.late || 0, on_time_pct: s.pct, avg_min: s.avg_min, holds: '', cancels: '', pending_now: '', late_now: '', period_from: range.from, period_to: range.to };
+    })).concat(shown.map(function (p) {
+      return { kind: 'person', person: p.person, role: p.role_label || p.role, orders: p.orders, pcs: p.pcs, on_time: p.on_time, late: p.late, on_time_pct: p.pct, avg_min: p.avg_min, holds: p.holds, cancels: p.cancels, pending_now: '', late_now: '', period_from: range.from, period_to: range.to };
+    }));
+    csv(rows, 'warehouse-performance');
+  };
+}
+
 function vDash(v) {
   var day = LS.getItem('imw_day') || today();
   call('dashboard', { date: day }).then(function (d) {

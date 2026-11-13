@@ -10,6 +10,9 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--brand:#7a1f4b;--brand2:#b8336a;--ink:#1d1a22;--muted:#6f6876;--line:#ebe6ee;--bg:#faf6f8;--card:#fff;--good:#1f8a5b;--mid:#c98a12;--low:#c4384b}
 *{box-sizing:border-box}html,body{margin:0}
@@ -55,6 +58,52 @@ pre.wa{white-space:pre-wrap;background:#effae9;border:1px solid #d3ecc6;padding:
 .sla-ok{background:#d8f3e5;color:#166b45}.sla-soon{background:#fff1c9;color:#8a5a00}.sla-late{background:#c4384b;color:#fff}.sla-wait{background:#efe3f7;color:#5b2a7a}
 .trk{display:inline-block;background:var(--ink);color:#fff;border-radius:7px;padding:1px 7px;font-family:ui-monospace,Menlo,monospace;font-weight:700;letter-spacing:.3px}
 .help summary{cursor:pointer;color:var(--brand);font-weight:600}.help ul{margin:6px 0;padding-left:18px}.st-cancelled{background:#ddd;color:#666;text-decoration:line-through}
+body.hub-page{background:#f8f9fa}
+body.hub-page main{max-width:1100px}
+.hub{font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;color:#0f172a}
+.hub-hero{background:#000;color:#fff;border-radius:12px;padding:16px 20px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;box-shadow:0 4px 6px -1px rgba(0,0,0,.1)}
+.hub-kicker{color:#c5a880;letter-spacing:2px;text-transform:uppercase;font-size:12px;font-weight:500}
+.hub-hero h2{margin:4px 0 0;font-size:20px;font-weight:600;letter-spacing:-.5px;color:#fff}
+.hub-hero .muted{color:#a1a1aa}
+.hub-controls{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;background:#fff;padding:12px 16px;border-radius:8px;border:1px solid #e2e8f0;margin-bottom:16px}
+.hub-controls label{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin:0 0 6px}
+.hub-controls input,.hub-controls select{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:9px 12px;font-size:14px;width:auto;min-width:140px}
+.hub-seg{display:flex;gap:4px;background:#f8f9fa;padding:4px;border-radius:8px;border:1px solid #e2e8f0}
+.hub-seg button{border:0;background:transparent;color:#64748b;padding:8px 12px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer}
+.hub-seg button.on{background:#000;color:#fff}
+.hub-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+.hub-kpi{background:#fff;padding:16px;border-radius:12px;border:1px solid #e2e8f0;border-left:4px solid #000;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.hub-kpi .t{font-size:11px;color:#64748b;text-transform:uppercase;font-weight:600;margin-bottom:6px;letter-spacing:.4px}
+.hub-kpi .v{font-size:22px;font-weight:700;color:#000;letter-spacing:-.5px}
+.hub-kpi .s{font-size:12px;color:#64748b;margin-top:4px}
+.hub-bar{background:#e2e8f0;height:6px;border-radius:3px;overflow:hidden;margin-top:8px;min-width:80px}
+.hub-bar>i{display:block;height:100%;background:#c5a880;border-radius:3px}
+.hub-card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.hub-card h3{font-size:16px;font-weight:600;letter-spacing:-.3px;margin:0}
+.hub-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px}
+.hub .tw{overflow-x:auto;border:1px solid #e2e8f0;border-radius:8px;-webkit-overflow-scrolling:touch}
+.hub table{width:100%;min-width:720px;border-collapse:collapse;font-size:13px}
+.hub th{background:#f8fafc;padding:12px 14px;color:#64748b;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid #e2e8f0;white-space:nowrap;text-align:left}
+.hub td{padding:12px 14px;border-bottom:1px solid #e2e8f0;white-space:nowrap;vertical-align:middle}
+.hub tr:last-child td{border-bottom:none}
+.hub tbody tr:hover td{background:#f8fafc}
+.hub-badge{display:inline-block;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.hub-ok{background:#d1fae5;color:#065f46}
+.hub-warn{background:#fef3c7;color:#92400e}
+.hub-bad{background:#fee2e2;color:#991b1b}
+.hub-gold{border-left-color:#c5a880}
+.hub-good{border-left-color:#10b981}
+.hub-danger{border-left-color:#ef4444}
+.hub-warnk{border-left-color:#f59e0b}
+.hub .hub-btn{background:#000;color:#fff;border-color:#000;border-radius:6px;font-weight:500}
+.hub-hero .hub-btn{background:#fff;color:#000;border-color:#fff}
+@media(max-width:700px){
+  .hub-kpis{grid-template-columns:repeat(2,1fr)}
+  .hub-hero{padding:14px}
+  .hub-controls{padding:10px}
+  .hub-controls input,.hub-controls select{min-width:0;flex:1 1 140px}
+}
+
 </style>
 </head>
 <body>
