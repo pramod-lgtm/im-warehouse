@@ -254,20 +254,55 @@ function vSetup(v) {
 
 // ---------------- lists
 function dealerHref(o) { return '#/q?d=' + encodeURIComponent(o.dealer_name || '') + (o.dealer_src_id ? '&src=' + encodeURIComponent(o.dealer_src_id) : ''); }
+function isCurrentDealerFilter(o) {
+  var raw = String(location.hash || '').replace(/^#/, '');
+  if ((raw.split('?')[0] || '') !== '/q') return false;
+  return hashQuery().d === String(o.dealer_name || '');
+}
+function dealerLinkHtml(o) {
+  var name = h(o.dealer_name);
+  if (isCurrentDealerFilter(o)) return '<span class="dname">' + name + '</span>';
+  return '<a class="dname" href="' + dealerHref(o) + '" style="text-decoration:underline">' + name + '</a>';
+}
+function isInteractiveClick(el) {
+  while (el && el !== document) {
+    var tag = (el.tagName || '').toLowerCase();
+    if (tag === 'a' || tag === 'button' || tag === 'input' || tag === 'select' || tag === 'textarea' || tag === 'label') return true;
+    el = el.parentNode;
+  }
+  return false;
+}
+function closestOid(el) {
+  while (el && el !== document) {
+    if (el.getAttribute && el.getAttribute('data-oid')) return el;
+    el = el.parentNode;
+  }
+  return null;
+}
+/** Whole card opens the order (v30 behaviour). Nested dealer / button / checkbox clicks are left alone — no <a> wrapping the card. */
+function bindOrderCardClicks(root) {
+  root = root || $('view');
+  if (!root || root._oidBound) return;
+  root._oidBound = 1;
+  root.addEventListener('click', function (e) {
+    if (isInteractiveClick(e.target)) return;
+    var c = closestOid(e.target);
+    if (c) go('/o/' + c.getAttribute('data-oid'));
+  });
+}
 function pendingWarnHtml(o) {
   var w = o.pending_warn; if (!w) return '';
   return '<div class="small short">⚠ Is dealer ka pehle order mein pending baaki hai: <b>' + pcs(w.remaining) + '</b> (' + (w.orders || []).map(function (x) { return '<a href="#/o/' + x.id + '">' + h(x.track_no || x.order_no || '#' + x.id) + '</a>'; }).join(', ') + '). Naya order mat banao — purane order par Pending executed use karein.</div>';
 }
 function cardInner(o) {
-  var dlink = '<a href="' + dealerHref(o) + '" style="text-decoration:underline">' + h(o.dealer_name) + '</a>';
-  return '<div class="row"><b><a href="#/o/' + o.id + '" style="color:inherit;text-decoration:none">' + trk(o) + h(ono(o)) + '</a> ' + dlink + '</b><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div>' +
+  return '<div class="row"><b><a href="#/o/' + o.id + '" style="color:inherit;text-decoration:none">' + trk(o) + h(ono(o)) + '</a> ' + dealerLinkHtml(o) + '</b><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div>' +
     '<div class="small">' + slaBadge(o) + '</div><div class="small muted">' + h(dmy(o.order_date)) + ' • ' + (o.zone ? '<b>' + h(o.zone) + '</b> / ' : '') + h(o.area || 'area ?') + (o.route ? ' • ' + h(o.route) : '') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.salesman ? ' • ' + h(o.salesman) : '') + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.expected_date ? ' • exp ' + h(dmy(o.expected_date)) : '') + (o.plan_delivery_date ? ' • plan ' + h(dmy(o.plan_delivery_date)) + (o.plan_van ? ' ' + h(o.plan_van) : '') : '') + '</div>' +
     '<div class="small">' + (o.lines || []).map(function (l) { return h(l.brand) + ' ' + pcs(l.ordered_qty); }).join(' + ') + ((o.lines || []).length > 1 ? ' = <b>' + pcs(o.pcs) + '</b>' : '') +
     [['Punch', o.punch_name], ['P', o.picker_name], ['C', o.checker_name], ['B', o.biller_name], ['Pk', o.packer_name]].filter(function (x) { return x[1]; }).map(function (x) { return ' • ' + x[0] + ': ' + h(x[1]); }).join('') + (o.invoice_no ? ' • Inv ' + h(o.invoice_no) : '') + (o.vehicle || o.delivery_mode ? ' • ' + h(o.vehicle || o.delivery_mode) : '') + '</div>' +
     (Number(o.hold) ? '<div class="small short">Hold: ' + h(o.hold_reason) + ' ' + h(o.hold_note) + '</div>' : '') + (o.stage === 'cancelled' ? '<div class="small short">Cancel: ' + h(o.cancel_reason) + '</div>' : '') + pendingWarnHtml(o);
 }
 function card(o, sel) {
-  var body = '<div class="card"' + (sel ? ' style="display:flex;align-items:flex-start;gap:8px"' : '') + '>' + (sel ? '<label style="flex:none;padding-top:2px"><input type="checkbox" class="qsel" data-id="' + o.id + '" style="width:22px;height:22px"></label><div style="flex:1">' : '') + cardInner(o) + (sel ? '</div>' : '') + '</div>';
+  var body = '<div class="card qcard" data-oid="' + o.id + '" style="cursor:pointer;' + (sel ? 'display:flex;align-items:flex-start;gap:8px' : '') + '">' + (sel ? '<label style="flex:none;padding-top:2px"><input type="checkbox" class="qsel" data-id="' + o.id + '" style="width:22px;height:22px"></label><div style="flex:1">' : '') + cardInner(o) + (sel ? '</div>' : '') + '</div>';
   return body;
 }
 function newBtn() { return canNew() ? '<button class="sm primary" onclick="location.hash=\'#/new\'">+ New order</button>' : ''; }
@@ -310,7 +345,7 @@ function leftoverCard(o) {
   var cyc = o.pending_cycle_info || (Number(o.pending_cycle) ? { cycle_status: o.stage, picker_name: o.picker_name } : null);
   var btn = can('pendingexec') && o.pending_status === 'open' && !cyc ? ' <button type="button" class="sm primary" data-pex="' + o.id + '">Pending executed</button>' : '';
   var cycNote = cyc ? ' • <span class="short">Cycle chal raha: ' + h(stageLbl(o.stage)) + (cyc.picker_name ? ' • picker ' + h(cyc.picker_name) : '') + '</span>' : '';
-  return '<div class="card">' + cardInner(o) + '<div class="small">Baaki: <b>' + pcs(o.pending_qty) + '</b>' + (lines ? ' • ' + lines : '') + cycNote + btn + '</div></div>';
+  return '<div class="card qcard" data-oid="' + o.id + '" style="cursor:pointer">' + cardInner(o) + '<div class="small">Baaki: <b>' + pcs(o.pending_qty) + '</b>' + (lines ? ' • ' + lines : '') + cycNote + btn + '</div></div>';
 }
 function pendingExecFormHtml(o) {
   var rows = (o.pending_lines || []).map(function (l) {
@@ -1553,5 +1588,6 @@ function vAdmin(v) {
 }
 // non-admin logout: long-press title
 $('title').addEventListener('click', function () { if (S.user && confirm('Logout karein?')) signOut(); });
+bindOrderCardClicks();
 route();
 })();
