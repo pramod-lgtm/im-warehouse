@@ -284,6 +284,27 @@ function qRange(k, d1, d2) {
     default: return null;
   }
 }
+function stillInWorkQueue(o) {
+  if (!o || o.stage === 'cancelled' || o.stage === 'merged' || o.stage === 'dispatched') return false;
+  var stages = (S.m && S.m.stages) || ['new', 'punched', 'allocated', 'picked', 'checked', 'billed', 'packed', 'dispatched', 'cancelled'];
+  var i = stages.indexOf(o.stage), b = stages.indexOf('billed');
+  return i >= 0 && b >= 0 ? i < b : ['new', 'punched', 'allocated', 'picked', 'checked'].indexOf(o.stage) >= 0;
+}
+function roleKeepsBilledInQueue() { var r = role(); return r === 'packer' || r === 'dispatch'; }
+/** Bill-date window for Bill ho chuka. Default last 7 days inclusive. Always returns a range so the tab stays fast. */
+function billedQRange(k, d1, d2) {
+  var t = today();
+  switch (k) {
+    case 'today': return [t, t];
+    case 'yday': var y = addDays(t, -1); return [y, y];
+    case 'month': return [t.slice(0, 8) + '01', t];
+    case 'date': return [d1 || t, d1 || t];
+    case 'range': return [d1 || addDays(t, -6), d2 || t];
+    case 'last7':
+    default: return [addDays(t, -6), t];
+  }
+}
+
 function leftoverCard(o) {
   var lines = (o.pending_lines || []).filter(function (l) { return Number(l.remaining) > 0; }).map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ' ' + pcs(l.remaining); }).join(' + ');
   var cyc = o.pending_cycle_info || (Number(o.pending_cycle) ? { cycle_status: o.stage, picker_name: o.picker_name } : null);
@@ -334,22 +355,27 @@ function openPendingExec(o, ondone) {
 
 function vQueue(v) {
   var hq = hashQuery();
+  var bk = LS.getItem('imw_bqf') || 'last7', bd1 = LS.getItem('imw_bqd1') || '', bd2 = LS.getItem('imw_bqd2') || '';
+  var br0 = billedQRange(bk, bd1, bd2);
   var jobs = [call('orders', {})];
   if (can('view')) jobs.push(call('dupList').catch(function () { return null; }));
   else jobs.push(Promise.resolve(null));
   jobs.push(call('pendingLeft').catch(function () { return null; }));
   if (hq.d) jobs.push(call('dealerPending', { dealer_name: hq.d, dealer_src_id: hq.src || '' }).catch(function () { return null; }));
   else jobs.push(Promise.resolve(null));
+  jobs.push(call('billedOrders', { from: br0[0], to: br0[1] }).catch(function (e) { return { error: e, orders: [], count: 0, from: br0[0], to: br0[1] }; }));
   Promise.all(jobs).then(function (rs) {
-    var list = rs[0], dupPairs = rs[1], left = rs[2], dealerPend = rs[3];
+    var raw = rs[0], dupPairs = rs[1], left = rs[2], dealerPend = rs[3], billed = rs[4] || { orders: [], count: 0 };
+    var list = roleKeepsBilledInQueue() ? raw : (raw || []).filter(stillInWorkQueue);
     var k = LS.getItem('imw_qf') || '', d1 = LS.getItem('imw_qd1') || '', d2 = LS.getItem('imw_qd2') || '';
     var qs = LS.getItem('imw_qs') || '', dq = hq.d || '';
     var opts = [['', 'Sab dates'], ['today', 'Aaj'], ['yday', 'Kal'], ['week', 'Is hafte'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
-    var stageOpts = [['', 'Sab'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['hold', 'HOLD'], ['dup', '⚠ Duplicates'], ['pending_bill', 'Pending for billing'], ['pending_left', 'Pending leftover']];
+    var billedOpts = [['last7', 'Last 7 days'], ['today', 'Aaj'], ['yday', 'Kal'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
+    var stageOpts = [['', 'Sab'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['hold', 'HOLD'], ['dup', '⚠ Duplicates'], ['pending_bill', 'Pending for billing'], ['pending_left', 'Pending leftover'], ['billed', 'Bill ho chuka']];
 
     v.innerHTML = '<div class="row"><h2>Meri queue (<span id="qn">' + list.length + '</span>)</h2>' + syncBtn() + '</div><p class="small muted">Last sync: ' + tm(S.m.last_sync) + '</p>' +
-      '<div class="row"><select id="qf">' + opts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === k ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
-      '<input type="date" id="qd1" value="' + h(d1) + '" title="Date / From"><input type="date" id="qd2" value="' + h(d2) + '" title="To"></div>' +
+      '<div class="row"><select id="qf"></select>' +
+      '<input type="date" id="qd1" title="Date / From"><input type="date" id="qd2" title="To"></div>' +
       '<div class="row" style="margin-top:8px;flex-wrap:wrap;gap:6px"><input id="qdl" placeholder="Dealer / customer search" style="flex:1;min-width:180px" list="qdl_list" autocomplete="off"><datalist id="qdl_list"></datalist></div>' +
       '<div class="row" style="margin-top:6px;flex-wrap:wrap;gap:6px" id="qstages"></div>' +
       '<p class="small" id="qsum"></p><div id="qlst"></div>';
@@ -368,28 +394,78 @@ function vQueue(v) {
       q = q.toUpperCase();
       return String(o.dealer_name || '').toUpperCase().indexOf(q) >= 0;
     }
+    function syncDateRow() {
+      var billedTab = qs === 'billed';
+      var curOpts = billedTab ? billedOpts : opts;
+      var curK = billedTab ? bk : k, cur1 = billedTab ? bd1 : d1, cur2 = billedTab ? bd2 : d2;
+      $('qf').innerHTML = curOpts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === curK ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('');
+      $('qd1').value = cur1; $('qd2').value = cur2;
+      var need1 = billedTab ? (bk === 'date' || bk === 'range') : (k === 'date' || k === 'range');
+      var need2 = billedTab ? bk === 'range' : k === 'range';
+      $('qd1').style.display = need1 ? '' : 'none'; $('qd2').style.display = need2 ? '' : 'none';
+      $('qdl').placeholder = billedTab ? 'Dealer / invoice / tracking' : 'Dealer / customer search';
+    }
+    function applyBilled(res) {
+      billed = res || { orders: [], count: 0 };
+      if (billed.error && /Unknown action/i.test(String(billed.error.message || billed.error))) billed.needDeploy = true;
+    }
+    applyBilled(billed);
+    function billedMatch(o, q) {
+      if (!q) return true;
+      q = String(q).toUpperCase();
+      return (String(o.dealer_name || '') + ' ' + String(o.track_no || '') + ' ' + String(o.invoice_no || '') + ' ' + String(o.order_no || '') + ' ' + String(o.src_id || '')).toUpperCase().indexOf(q) >= 0;
+    }
+    function billedShown() { return (billed.orders || []).filter(function (o) { return billedMatch(o, dq); }); }
+    function loadBilled(then) {
+      var r = billedQRange(bk, bd1, bd2);
+      call('billedOrders', { from: r[0], to: r[1] }).then(function (res) { applyBilled(res); if (then) then(); }).catch(function (e) { applyBilled({ error: e, orders: [], count: 0, from: r[0], to: r[1] }); if (then) then(); });
+    }
+    function drawBilled() {
+      var lo = billedShown();
+      var r = [billed.from || billedQRange(bk, bd1, bd2)[0], billed.to || billedQRange(bk, bd1, bd2)[1]];
+      $('qn').textContent = lo.length;
+      var bits = ['Bill date ' + h(dmy(r[0]) || r[0]) + ' se ' + h(dmy(r[1]) || r[1]), 'naye bill pehle'];
+      if (dq) bits.push('search "' + h(dq) + '"');
+      var msg = billed.needDeploy
+        ? 'Server update baaki hai — Bill ho chuka ke liye Code_v32.gs deploy karein. Tab tak billed orders Meri queue ke Sab se hata diye gaye hain.'
+        : (lo.length ? '<b>' + lo.length + '</b> billed orders. Pack / dispatch Delivery tab se, leftover pending Pending leftover se.' : 'Is date range mein koi billed order nahi.');
+      $('qsum').innerHTML = bits.join(' · ') + ': ' + msg + (lo.length ? ' <button type="button" class="sm" id="bex">CSV</button>' : '');
+      $('qlst').innerHTML = lo.length ? lo.map(card).join('') : '<div class="card center muted">' + (billed.needDeploy ? 'Bill ho chuka tab server update ke baad khulega.' : 'Is filter mein koi billed order nahi.') + '</div>';
+      if ($('bex')) $('bex').onclick = function () {
+        csv(lo.map(function (o) { return { billed_at: o.billed_at, bill_date: o.billed_at, invoice_no: o.invoice_no, tracking_no: o.track_no, order: o.order_no || o.id, dealer: o.dealer_name, stage: o.stage, pcs: o.pcs, billed_value: o.billed_value }; }), 'bill-ho-chuka');
+      };
+    }
     function draw() {
-      $('qd1').style.display = k === 'date' || k === 'range' ? '' : 'none'; $('qd2').style.display = k === 'range' ? '' : 'none';
+      syncDateRow();
+      if (qs === 'billed') {
+        var names = {};
+        (billed.orders || []).forEach(function (o) { if (o.dealer_name) names[o.dealer_name] = 1; });
+        $('qdl_list').innerHTML = Object.keys(names).sort().map(function (n) { return '<option value="' + h(n) + '">'; }).join('');
+      }
       var r = qRange(k, d1, d2), base = r ? list.filter(function (o) { var d = String(o.order_date || ''); return d >= r[0] && d <= r[1]; }) : list;
-      var names = {};
-      base.forEach(function (o) { if (o.dealer_name) names[o.dealer_name] = 1; });
-      $('qdl_list').innerHTML = Object.keys(names).sort().map(function (n) { return '<option value="' + h(n) + '">'; }).join('');
+      if (qs !== 'billed') {
+        var names = {};
+        base.forEach(function (o) { if (o.dealer_name) names[o.dealer_name] = 1; });
+        $('qdl_list').innerHTML = Object.keys(names).sort().map(function (n) { return '<option value="' + h(n) + '">'; }).join('');
+      }
       var mid = base.filter(function (o) { return qDealerOk(o, dq); });
-      var pairs = dupPairs != null ? dupPairs : dupPairsFromOrders(list);
+      var pairs = dupPairs != null ? dupPairs : dupPairsFromOrders(raw);
       var shownDups = dupGroupsInList(dupGroupList(pairs), mid);
       $('qstages').innerHTML = stageOpts.map(function (s) {
         var n, leftList = (left && left.orders) || [];
         if (s[0] === 'dup') n = shownDups.length;
         else if (s[0] === 'pending_left') n = (dq ? leftList.filter(function (o) { return qDealerOk(o, dq); }) : leftList).length;
+        else if (s[0] === 'billed') n = billedShown().length;
         else n = mid.filter(function (o) { return qStageOk(o, s[0]); }).length;
         return '<button type="button" class="sm' + (qs === s[0] ? ' primary' : ((s[0] === 'dup' || s[0] === 'pending_left') && n ? ' danger' : '')) + '" data-qs="' + s[0] + '">' + s[1] + ' (' + n + ')</button>';
       }).join('');
       Array.prototype.forEach.call(document.querySelectorAll('#qstages [data-qs]'), function (b) {
-        b.onclick = function () { qs = b.getAttribute('data-qs'); LS.setItem('imw_qs', qs); draw(); };
+        b.onclick = function () { qs = b.getAttribute('data-qs'); LS.setItem('imw_qs', qs); if (qs === 'billed') loadBilled(draw); else draw(); };
       });
       var bits = [];
-      if (r) bits.push('Order date ' + h(dmy(r[0] === '0000-00-00' ? '' : r[0]) || '...') + ' se ' + h(dmy(r[1] === '9999-12-31' ? '' : r[1]) || '...'));
-      if (dq) bits.push('dealer "' + h(dq) + '"');
+      if (qs !== 'billed' && r) bits.push('Order date ' + h(dmy(r[0] === '0000-00-00' ? '' : r[0]) || '...') + ' se ' + h(dmy(r[1] === '9999-12-31' ? '' : r[1]) || '...'));
+      if (dq && qs !== 'billed') bits.push('dealer "' + h(dq) + '"');
+      if (qs === 'billed') { drawBilled(); return; }
       if (qs === 'dup') {
         var oc = shownDups.reduce(function (a, g) { return a + g.orders.length; }, 0);
         $('qn').textContent = shownDups.length + (r || dq || qs ? ' / ' + list.length : '');
@@ -417,7 +493,7 @@ function vQueue(v) {
       $('qn').textContent = f.length + (r || dq || qs ? ' / ' + list.length : '');
       $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : 'Sab: ') + '<b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>' +
         (canMark ? ' · <button type="button" class="sm primary" id="qmd">Mark duplicate</button> <span class="small muted">2+ orders select karke mark karein</span>' : '');
-      $('qlst').innerHTML = pendHead + (f.length ? f.map(function (o) { return card(o, canMark); }).join('') : (pendHead ? '' : '<div class="card center muted">' + ((r || dq || qs) ? 'Is filter mein koi order nahi.' : 'Abhi koi kaam nahi.') + '</div>'));
+      $('qlst').innerHTML = pendHead + (f.length ? f.map(function (o) { return card(o, canMark); }).join('') : (pendHead ? '' : '<div class="card center muted">' + ((r || dq || qs) ? 'Is filter mein koi order nahi.' : 'Abhi koi kaam nahi. Bill ho chuke orders Bill ho chuka tab mein hain.') + '</div>'));
       Array.prototype.forEach.call(v.querySelectorAll('[data-pex]'), function (b) { b.onclick = function () { var id = Number(b.getAttribute('data-pex')); var o = ((dealerPend && dealerPend.open) || []).filter(function (x) { return Number(x.id) === id; })[0]; if (o) openPendingExec(o, function () { vQueue(v); }); }; });
       if (canMark && $('qmd')) $('qmd').onclick = function () {
         var ids = Array.prototype.map.call(v.querySelectorAll('.qsel:checked'), function (x) { return Number(x.dataset.id); });
@@ -426,11 +502,30 @@ function vQueue(v) {
         call('markDups', { ids: ids }).then(function () { toast('Duplicate mark ho gaya'); qs = 'dup'; LS.setItem('imw_qs', qs); vQueue(v); }).catch(fail);
       };
     }
-    $('qf').onchange = function () { k = this.value; LS.setItem('imw_qf', k); if ((k === 'date' || k === 'range') && !d1) { d1 = today(); $('qd1').value = d1; LS.setItem('imw_qd1', d1); } draw(); };
-    $('qd1').onchange = function () { d1 = this.value; LS.setItem('imw_qd1', d1); draw(); };
-    $('qd2').onchange = function () { d2 = this.value; LS.setItem('imw_qd2', d2); draw(); };
+    $('qf').onchange = function () {
+      if (qs === 'billed') {
+        bk = this.value; LS.setItem('imw_bqf', bk);
+        if ((bk === 'date' || bk === 'range') && !bd1) { bd1 = today(); $('qd1').value = bd1; LS.setItem('imw_bqd1', bd1); }
+        loadBilled(draw);
+      } else {
+        k = this.value; LS.setItem('imw_qf', k);
+        if ((k === 'date' || k === 'range') && !d1) { d1 = today(); $('qd1').value = d1; LS.setItem('imw_qd1', d1); }
+        draw();
+      }
+    };
+    $('qd1').onchange = function () {
+      if (qs === 'billed') { bd1 = this.value; LS.setItem('imw_bqd1', bd1); loadBilled(draw); }
+      else { d1 = this.value; LS.setItem('imw_qd1', d1); draw(); }
+    };
+    $('qd2').onchange = function () {
+      if (qs === 'billed') { bd2 = this.value; LS.setItem('imw_bqd2', bd2); loadBilled(draw); }
+      else { d2 = this.value; LS.setItem('imw_qd2', d2); draw(); }
+    };
     if ($('qdl') && dq) $('qdl').value = dq;
-    $('qdl').oninput = function () { dq = this.value.trim(); draw(); };
+    $('qdl').oninput = function () {
+      dq = this.value.trim();
+      draw();
+    };
     draw(); bindSync(function () { vQueue(v); });
   }).catch(fail);
 }

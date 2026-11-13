@@ -65,4 +65,9 @@ Warehouse manager (or admin): tap the **dealer name** in Meri queue, review orde
 
 Meri queue also has a **Pending leftover** chip (includes already dispatched orders). If a new order arrives for a dealer who still has older leftover pending, a warning is shown on the queue card, the order page, and New order. This is separate from **Pending for billing** (orders not yet billed).
 
-Frontend sw **im-warehouse-v31**. Backend schema **20** (`PendingExec` tab).
+Frontend sw **im-warehouse-v32**. Backend schema **20** (`PendingExec` tab).
+
+## Bill ho chuka (billed orders)
+Meri queue **Sab** list shows only orders that still have pre-bill work (picking, checking, billing, hold, duplicates, leftover pending). Once an order is billed it leaves this list and appears under the **Bill ho chuka** chip, searchable by dealer / invoice / tracking, filterable by bill date (default last 7 days), newest first. Packed and dispatched orders are in this tab too.
+
+If leftover pending on that same order is sent back to picking (Pending executed), the order returns to Meri queue at the picking stage — no new order is created.
