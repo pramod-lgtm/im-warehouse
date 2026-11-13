@@ -71,3 +71,10 @@ Frontend sw **im-warehouse-v32**. Backend schema **20** (`PendingExec` tab).
 Meri queue **Sab** list shows only orders that still have pre-bill work (picking, checking, billing, hold, duplicates, leftover pending). Once an order is billed it leaves this list and appears under the **Bill ho chuka** chip, searchable by dealer / invoice / tracking, filterable by bill date (default last 7 days), newest first. Packed and dispatched orders are in this tab too.
 
 If leftover pending on that same order is sent back to picking (Pending executed), the order returns to Meri queue at the picking stage — no new order is created.
+
+## Store orders (Karwa Marketing)
+A store order is identified only by **source = `Karwa Marketing Store`**. Warehouse creates it on the Store orders tab (`#/sq`), choosing one of the 9 Intimissi / Karwa Marketing stores, then attaches order / pending-page / execution photos. Sales Tracker imports stay `source = Sales Tracker` and are **not** treated as store orders, even if the dealer name looks like a store.
+
+These orders do **not** appear in Meri queue (including Bill ho chuka and Pending leftover). They have their own Store orders queue that works the same way: pick / check / bill, leftover pending cycles, and billed orders under **Bill ho chuka** (last 7 bill days, newest first). The tab is in the bottom nav for every workflow role so the picker, checker and biller can run the same flow; warehouse manager and picker are the primary users. Admin and dispatch can still create a store order.
+
+Frontend sw **im-warehouse-v33**. Backend schema still **20**.

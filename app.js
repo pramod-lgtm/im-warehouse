@@ -365,8 +365,12 @@ function vQueue(v) {
   else jobs.push(Promise.resolve(null));
   jobs.push(call('billedOrders', { from: br0[0], to: br0[1] }).catch(function (e) { return { error: e, orders: [], count: 0, from: br0[0], to: br0[1] }; }));
   Promise.all(jobs).then(function (rs) {
-    var raw = rs[0], dupPairs = rs[1], left = rs[2], dealerPend = rs[3], billed = rs[4] || { orders: [], count: 0 };
-    var list = roleKeepsBilledInQueue() ? raw : (raw || []).filter(stillInWorkQueue);
+    var raw = (rs[0] || []).filter(function (o) { return !isStore(o); }), dupPairs = rs[1], left = rs[2], dealerPend = rs[3], billed = rs[4] || { orders: [], count: 0 };
+    if (left && left.orders) {
+      var leftOnly = left.orders.filter(function (o) { return !isStore(o); });
+      left = { orders: leftOnly, count: leftOnly.length, remaining: leftOnly.reduce(function (a, o) { return a + (Number(o.pending_qty) || 0); }, 0) };
+    }
+    var list = roleKeepsBilledInQueue() ? raw : raw.filter(stillInWorkQueue);
     var k = LS.getItem('imw_qf') || '', d1 = LS.getItem('imw_qd1') || '', d2 = LS.getItem('imw_qd2') || '';
     var qs = LS.getItem('imw_qs') || '', dq = hq.d || '';
     var opts = [['', 'Sab dates'], ['today', 'Aaj'], ['yday', 'Kal'], ['week', 'Is hafte'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
@@ -407,6 +411,8 @@ function vQueue(v) {
     }
     function applyBilled(res) {
       billed = res || { orders: [], count: 0 };
+      billed.orders = (billed.orders || []).filter(function (o) { return !isStore(o); });
+      billed.count = billed.orders.length;
       if (billed.error && /Unknown action/i.test(String(billed.error.message || billed.error))) billed.needDeploy = true;
     }
     applyBilled(billed);
@@ -1039,41 +1045,175 @@ function uploadAll(id, store) {
 }
 function kindLbl(k) { return PHOTO_KINDS.filter(function (x) { return x[0] === k; })[0][1]; }
 function vStoreQueue(v) {
-  call('storeOrders', {}).then(function (list) {
-    var k = LS.getItem('imw_sqf') || '', d1 = LS.getItem('imw_sqd1') || '', d2 = LS.getItem('imw_sqd2') || '', qs = LS.getItem('imw_sqs') || '', sq = '';
+  var bk = LS.getItem('imw_sbqf') || 'last7', bd1 = LS.getItem('imw_sbqd1') || '', bd2 = LS.getItem('imw_sbqd2') || '';
+  var br0 = billedQRange(bk, bd1, bd2);
+  var jobs = [
+    call('storeOrders', {}),
+    call('pendingLeft', { store: 1 }).catch(function () { return null; }),
+    call('billedOrders', { store: 1, from: br0[0], to: br0[1] }).catch(function (e) { return { error: e, orders: [], count: 0, from: br0[0], to: br0[1] }; })
+  ];
+  Promise.all(jobs).then(function (rs) {
+    var raw = (rs[0] || []).filter(isStore);
+    var left = rs[1];
+    if (left && left.orders) {
+      var leftOnly = left.orders.filter(isStore);
+      left = { orders: leftOnly, count: leftOnly.length, remaining: leftOnly.reduce(function (a, o) { return a + (Number(o.pending_qty) || 0); }, 0) };
+    }
+    var list = roleKeepsBilledInQueue() ? raw : raw.filter(stillInWorkQueue);
+    var billed = rs[2] || { orders: [], count: 0 };
+    var k = LS.getItem('imw_sqf') || '', d1 = LS.getItem('imw_sqd1') || '', d2 = LS.getItem('imw_sqd2') || '';
+    var qs = LS.getItem('imw_sqs') || '', stn = LS.getItem('imw_sqst') || '', sq = '';
+    if (qs === 'ready') { qs = 'billed'; LS.setItem('imw_sqs', qs); }
     var opts = [['', 'Sab dates'], ['today', 'Aaj'], ['yday', 'Kal'], ['week', 'Is hafte'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
-    var stageOpts = [['', 'Sab'], ['new', 'Naye'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['ready', 'Bill ho gaya'], ['hold', 'HOLD'], ['nophoto', 'Photo baaki']];
-    v.innerHTML = '<div class="row"><h2>Store orders (<span id="sqn">' + list.length + '</span>)</h2>' + (canNew() ? '<button class="primary" style="flex:0;white-space:nowrap" onclick="location.hash=\'#/sq/new\'">+ Store order</button>' : '') + '</div>' +
-      '<p class="small muted">Karwa Marketing (Intimissi) stores ke orders. Store se aaya order warehouse yahan khud daalta hai, order photo, pending page aur execution page ki photo ke saath.</p>' +
-      '<div class="row"><select id="sqf">' + opts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === k ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
-      '<input type="date" id="sqd1" value="' + h(d1) + '"><input type="date" id="sqd2" value="' + h(d2) + '"></div>' +
-      '<div class="row" style="margin-top:8px"><select id="sqst"><option value="">Sab stores</option>' + storeList().map(function (x) { return '<option>' + h(x) + '</option>'; }).join('') + '</select><input id="sqq" placeholder="Store / tracking no search" style="flex:1;min-width:160px"></div>' +
+    var billedOpts = [['last7', 'Last 7 days'], ['today', 'Aaj'], ['yday', 'Kal'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
+    var stageOpts = [['', 'Sab'], ['new', 'Naye'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['hold', 'HOLD'], ['nophoto', 'Photo baaki'], ['pending_bill', 'Pending for billing'], ['pending_left', 'Pending leftover'], ['billed', 'Bill ho chuka']];
+
+    v.innerHTML = '<div class="row"><h2>Store orders (<span id="sqn">' + list.length + '</span>)</h2>' + syncBtn() + (canNew() ? '<button class="primary" style="flex:0;white-space:nowrap" onclick="location.hash=\'#/sq/new\'">+ Store order</button>' : '') + '</div>' +
+      '<p class="small muted">Sirf Karwa Marketing (Intimissi) store orders. Meri queue jaisa pick / check / bill flow. Bill ho chuke yahan Bill ho chuka mein jaate hain, Meri queue mein nahi. Last sync: ' + tm(S.m.last_sync) + '</p>' +
+      '<div class="row"><select id="sqf"></select>' +
+      '<input type="date" id="sqd1" title="Date / From"><input type="date" id="sqd2" title="To"></div>' +
+      '<div class="row" style="margin-top:8px;flex-wrap:wrap;gap:6px"><select id="sqst" style="flex:0"><option value="">Sab stores</option>' + storeList().map(function (x) { return '<option value="' + h(x) + '"' + (x === stn ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select>' +
+      '<input id="sqq" placeholder="Store / tracking no search" style="flex:1;min-width:160px"></div>' +
       '<div class="row" style="margin-top:6px;flex-wrap:wrap;gap:6px" id="sqstages"></div><p class="small" id="sqsum"></p><div id="sqlst"></div>';
+
     function stOk(o, st) {
-      if (!st) return true; if (st === 'hold') return !!Number(o.hold);
+      if (!st) return true;
+      if (st === 'hold') return !!Number(o.hold);
       if (st === 'nophoto') { var p = o.photos || {}; return !(p.order && p.pending && p.exec); }
-      if (st === 'new') return o.stage === 'new' || o.stage === 'punched'; if (st === 'picking') return o.stage === 'allocated'; if (st === 'checking') return o.stage === 'picked'; if (st === 'billing') return o.stage === 'checked';
-      if (st === 'ready') return o.stage === 'billed' || o.stage === 'packed'; return o.stage === st;
+      if (st === 'new') return o.stage === 'new' || o.stage === 'punched';
+      if (st === 'picking') return o.stage === 'allocated';
+      if (st === 'checking') return o.stage === 'picked';
+      if (st === 'billing') return o.stage === 'checked';
+      if (st === 'pending_bill') return o.stage !== 'cancelled' && o.stage !== 'dispatched' && ['new', 'punched', 'allocated', 'picked', 'checked'].indexOf(o.stage) >= 0;
+      if (st === 'pending_left') return o.pending_status === 'open' && Number(o.pending_qty) > 0;
+      if (st === 'billed' || st === 'ready') return o.stage === 'billed' || o.stage === 'packed' || o.stage === 'dispatched';
+      return o.stage === st;
     }
-    function scard(o) { var c = card(o); return c.slice(0, -4) + '<div class="small" style="margin-top:4px">🏬 <b>' + h(storeOf(o)) + '</b> ' + photoFlags(o) + '</div></a>'; }
+    function storeMatch(o, storeName, q) {
+      if (storeName && storeOf(o) !== storeName) return false;
+      if (!q) return true;
+      q = String(q).toUpperCase();
+      return (storeOf(o) + ' ' + String(o.dealer_name || '') + ' ' + String(o.track_no || '') + ' ' + ono(o) + ' ' + String(o.invoice_no || '')).toUpperCase().indexOf(q) >= 0;
+    }
+    function scard(o) {
+      var c = card(o);
+      return c.slice(0, -6) + '<div class="small" style="margin-top:4px">🏬 <b>' + h(storeOf(o)) + '</b> ' + photoFlags(o) + '</div></div>';
+    }
+    function leftoverStoreCard(o) {
+      var c = leftoverCard(o);
+      return c.replace(/<\/div>\s*$/, '<div class="small" style="margin-top:4px">🏬 <b>' + h(storeOf(o)) + '</b> ' + photoFlags(o) + '</div></div>');
+    }
+    function syncDateRow() {
+      var billedTab = qs === 'billed';
+      var curOpts = billedTab ? billedOpts : opts;
+      var curK = billedTab ? bk : k, cur1 = billedTab ? bd1 : d1, cur2 = billedTab ? bd2 : d2;
+      $('sqf').innerHTML = curOpts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === curK ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('');
+      $('sqd1').value = cur1; $('sqd2').value = cur2;
+      var need1 = billedTab ? (bk === 'date' || bk === 'range') : (k === 'date' || k === 'range');
+      var need2 = billedTab ? bk === 'range' : k === 'range';
+      $('sqd1').style.display = need1 ? '' : 'none'; $('sqd2').style.display = need2 ? '' : 'none';
+      $('sqq').placeholder = billedTab ? 'Store / invoice / tracking' : 'Store / tracking no search';
+    }
+    function applyBilled(res) {
+      billed = res || { orders: [], count: 0 };
+      billed.orders = (billed.orders || []).filter(isStore);
+      billed.count = billed.orders.length;
+      if (billed.error && /Unknown action/i.test(String(billed.error.message || billed.error))) billed.needDeploy = true;
+    }
+    applyBilled(billed);
+    function billedShown() { return (billed.orders || []).filter(function (o) { return storeMatch(o, stn, sq); }); }
+    function loadBilled(then) {
+      var r = billedQRange(bk, bd1, bd2);
+      call('billedOrders', { store: 1, from: r[0], to: r[1] }).then(function (res) { applyBilled(res); if (then) then(); }).catch(function (e) { applyBilled({ error: e, orders: [], count: 0, from: r[0], to: r[1] }); if (then) then(); });
+    }
+    function bindPex(rows) {
+      Array.prototype.forEach.call(v.querySelectorAll('[data-pex]'), function (b) {
+        b.onclick = function () {
+          var id = Number(b.getAttribute('data-pex'));
+          var o = (rows || []).filter(function (x) { return Number(x.id) === id; })[0];
+          if (o) openPendingExec(o, function () { vStoreQueue(v); });
+        };
+      });
+    }
+    function drawBilled() {
+      var lo = billedShown();
+      var r = [billed.from || billedQRange(bk, bd1, bd2)[0], billed.to || billedQRange(bk, bd1, bd2)[1]];
+      $('sqn').textContent = lo.length;
+      var bits = ['Bill date ' + h(dmy(r[0]) || r[0]) + ' se ' + h(dmy(r[1]) || r[1]), 'naye bill pehle'];
+      if (stn) bits.push('store ' + h(stn));
+      if (sq) bits.push('search "' + h(sq) + '"');
+      var msg = billed.needDeploy
+        ? 'Server update baaki hai — Bill ho chuka ke liye Code_v33.gs deploy karein.'
+        : (lo.length ? '<b>' + lo.length + '</b> billed store orders.' : 'Is date range mein koi billed store order nahi.');
+      $('sqsum').innerHTML = bits.join(' · ') + ': ' + msg + (lo.length ? ' <button type="button" class="sm" id="sbex">CSV</button>' : '');
+      $('sqlst').innerHTML = lo.length ? lo.map(scard).join('') : '<div class="card center muted">' + (billed.needDeploy ? 'Bill ho chuka tab server update ke baad khulega. Tab tak billed store orders Sab list se hata diye gaye hain.' : 'Is filter mein koi billed store order nahi.') + '</div>';
+      if ($('sbex')) $('sbex').onclick = function () {
+        csv(lo.map(function (o) { return { billed_at: o.billed_at, invoice_no: o.invoice_no, tracking_no: o.track_no, order: o.order_no || o.id, store: storeOf(o), dealer: o.dealer_name, stage: o.stage, pcs: o.pcs, billed_value: o.billed_value }; }), 'store-bill-ho-chuka');
+      };
+    }
     function draw() {
-      $('sqd1').style.display = k === 'date' || k === 'range' ? '' : 'none'; $('sqd2').style.display = k === 'range' ? '' : 'none';
-      var r = qRange(k, d1, d2), stn = val('sqst'), q = sq.toUpperCase();
-      var mid = list.filter(function (o) { var d = String(o.order_date || ''); return (!r || d >= r[0] && d <= r[1]) && (!stn || storeOf(o) === stn) && (!q || (storeOf(o) + ' ' + o.dealer_name + ' ' + (o.track_no || '') + ' ' + ono(o)).toUpperCase().indexOf(q) >= 0); });
-      $('sqstages').innerHTML = stageOpts.map(function (s) { return '<button type="button" class="sm' + (qs === s[0] ? ' primary' : '') + '" data-sqs="' + s[0] + '">' + s[1] + ' (' + mid.filter(function (o) { return stOk(o, s[0]); }).length + ')</button>'; }).join('');
-      Array.prototype.forEach.call(document.querySelectorAll('[data-sqs]'), function (b) { b.onclick = function () { qs = b.getAttribute('data-sqs'); LS.setItem('imw_sqs', qs); draw(); }; });
+      syncDateRow();
+      var r = qRange(k, d1, d2);
+      var base = r ? list.filter(function (o) { var d = String(o.order_date || ''); return d >= r[0] && d <= r[1]; }) : list;
+      var mid = base.filter(function (o) { return storeMatch(o, stn, sq); });
+      var leftList = ((left && left.orders) || []).filter(function (o) { return storeMatch(o, stn, sq); });
+      $('sqstages').innerHTML = stageOpts.map(function (s) {
+        var n;
+        if (s[0] === 'pending_left') n = leftList.length;
+        else if (s[0] === 'billed') n = billedShown().length;
+        else n = mid.filter(function (o) { return stOk(o, s[0]); }).length;
+        return '<button type="button" class="sm' + (qs === s[0] ? ' primary' : ((s[0] === 'pending_left' || s[0] === 'nophoto') && n ? ' danger' : '')) + '" data-sqs="' + s[0] + '">' + s[1] + ' (' + n + ')</button>';
+      }).join('');
+      Array.prototype.forEach.call(document.querySelectorAll('#sqstages [data-sqs]'), function (b) {
+        b.onclick = function () { qs = b.getAttribute('data-sqs'); LS.setItem('imw_sqs', qs); if (qs === 'billed') loadBilled(draw); else draw(); };
+      });
+      var bits = [];
+      if (qs !== 'billed' && r) bits.push('Order date ' + h(dmy(r[0] === '0000-00-00' ? '' : r[0]) || '...') + ' se ' + h(dmy(r[1] === '9999-12-31' ? '' : r[1]) || '...'));
+      if (stn) bits.push('store ' + h(stn));
+      if (sq && qs !== 'billed') bits.push('search "' + h(sq) + '"');
+      if (qs === 'billed') { drawBilled(); return; }
+      if (qs === 'pending_left') {
+        $('sqn').textContent = leftList.length;
+        $('sqsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : '') + '<b>' + leftList.length + '</b> store orders with leftover pending, <b>' + pcs(leftList.reduce(function (a, o) { return a + (Number(o.pending_qty) || 0); }, 0)) + ' baaki</b>. Pending executed se yahi order picking par wapas jaata hai.';
+        $('sqlst').innerHTML = leftList.length ? leftList.map(leftoverStoreCard).join('') : '<div class="card center muted">Koi leftover pending nahi.</div>';
+        bindPex(leftList);
+        return;
+      }
       var f = mid.filter(function (o) { return stOk(o, qs); });
-      $('sqn').textContent = f.length + (f.length !== list.length ? ' / ' + list.length : '');
-      $('sqsum').innerHTML = '<b>' + f.length + '</b> orders, <b>' + pcs(f.reduce(function (a, o) { return a + (Number(o.pcs) || 0); }, 0)) + '</b>';
-      $('sqlst').innerHTML = f.length ? f.map(scard).join('') : '<div class="card center muted">' + (list.length ? 'Is filter mein koi store order nahi.' : 'Abhi koi store order nahi. Store se order aaye to upar "+ Store order" dabayein, store chunein, brand aur pcs daalein, aur teen photo lagayein: order, pending page, execution page.') + '</div>';
+      var tp = f.reduce(function (a, o) { return a + (Number(o.pcs) || 0); }, 0);
+      $('sqn').textContent = f.length + (r || stn || sq || qs ? ' / ' + list.length : '');
+      $('sqsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : 'Sab: ') + '<b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>';
+      var empty = list.length
+        ? 'Is filter mein koi store order nahi.'
+        : (canNew() ? 'Abhi koi store order nahi. Store se order aaye to upar "+ Store order" dabayein, store chunein, brand aur pcs daalein, aur teen photo lagayein: order, pending page, execution page. Bill ho chuke orders Bill ho chuka tab mein hain.' : 'Abhi aapke liye koi store order nahi. Bill ho chuke orders Bill ho chuka tab mein hain.');
+      $('sqlst').innerHTML = f.length ? f.map(scard).join('') : '<div class="card center muted">' + empty + '</div>';
+      bindPex(f);
     }
-    $('sqf').onchange = function () { k = this.value; LS.setItem('imw_sqf', k); if ((k === 'date' || k === 'range') && !d1) { d1 = today(); $('sqd1').value = d1; LS.setItem('imw_sqd1', d1); } draw(); };
-    $('sqd1').onchange = function () { d1 = this.value; LS.setItem('imw_sqd1', d1); draw(); };
-    $('sqd2').onchange = function () { d2 = this.value; LS.setItem('imw_sqd2', d2); draw(); };
-    $('sqst').onchange = draw; $('sqq').oninput = function () { sq = this.value.trim(); draw(); };
-    draw();
+    $('sqf').onchange = function () {
+      if (qs === 'billed') {
+        bk = this.value; LS.setItem('imw_sbqf', bk);
+        if ((bk === 'date' || bk === 'range') && !bd1) { bd1 = today(); $('sqd1').value = bd1; LS.setItem('imw_sbqd1', bd1); }
+        loadBilled(draw);
+      } else {
+        k = this.value; LS.setItem('imw_sqf', k);
+        if ((k === 'date' || k === 'range') && !d1) { d1 = today(); $('sqd1').value = d1; LS.setItem('imw_sqd1', d1); }
+        draw();
+      }
+    };
+    $('sqd1').onchange = function () {
+      if (qs === 'billed') { bd1 = this.value; LS.setItem('imw_sbqd1', bd1); loadBilled(draw); }
+      else { d1 = this.value; LS.setItem('imw_sqd1', d1); draw(); }
+    };
+    $('sqd2').onchange = function () {
+      if (qs === 'billed') { bd2 = this.value; LS.setItem('imw_sbqd2', bd2); loadBilled(draw); }
+      else { d2 = this.value; LS.setItem('imw_sqd2', d2); draw(); }
+    };
+    $('sqst').onchange = function () { stn = this.value; LS.setItem('imw_sqst', stn); draw(); };
+    $('sqq').oninput = function () { sq = this.value.trim(); draw(); };
+    draw(); bindSync(function () { vStoreQueue(v); });
   }).catch(fail);
 }
+
 function vStoreNew(v, ed) {
   if (!canNew()) return go('/sq');
   var stores = storeList(), cur = ed ? (ed.store_name || '') : '', lines = ed ? ed.lines.map(function (l) { return { brand: l.brand, item: l.item, qty: l.ordered_qty }; }) : [{ brand: '' }], photos = {};
