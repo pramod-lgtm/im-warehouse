@@ -67,15 +67,17 @@ Meri queue also has a **Pending leftover** chip (includes already dispatched ord
 
 Frontend sw **im-warehouse-v32**. Backend schema **20** (`PendingExec` tab).
 
-## Bill ho chuka (billed orders)
-Meri queue **Sab** list shows only orders that still have pre-bill work (picking, checking, billing, hold, duplicates, leftover pending). Once an order is billed it leaves this list and appears under the **Bill ho chuka** chip, searchable by dealer / invoice / tracking, filterable by bill date (default last 7 days), newest first. Packed and dispatched orders are in this tab too.
+## Order flow tabs (v36): Picking, Checking, Billing, Packing, Ready for despatch
+Meri queue **Sab** list keeps an order until **packing is done**. Stage chips: **Picking** (allocated), **Checking** (picked), **Billing** (checked), **Packing** (billed, waiting for pack + boxes), then **Ready for despatch** (packed, plus already dispatched history). Billed orders no longer leave the queue, so admin / warehouse manager / packer can still press Pack. Ready for despatch is searchable by dealer / invoice / tracking and filterable by bill date (default last 7 days, newest first). Dispatch is done from the order page or Delivery tab.
 
-If leftover pending on that same order is sent back to picking (Pending executed), the order returns to Meri queue at the picking stage — no new order is created.
+If leftover pending on that same order is sent back to picking (Pending executed), the order returns to Meri queue at the picking stage, no new order is created.
+
+Needs backend **Code_v36.gs** (admin / manager queue now returns billed; `billedOrders` takes `ready:1`). Deploy order does not matter: old frontend with new backend and new frontend with old backend both work, the packing queue only shows for admin / manager once v36 is pasted.
 
 ## Store orders (Karwa Marketing)
 A store order is identified only by **source = `Karwa Marketing Store`**. Warehouse creates it on the Store orders tab (`#/sq`), choosing one of the 9 Intimissi / Karwa Marketing stores, then attaches order / pending-page / execution photos. Sales Tracker imports stay `source = Sales Tracker` and are **not** treated as store orders, even if the dealer name looks like a store.
 
-These orders do **not** appear in Meri queue (including Bill ho chuka and Pending leftover). They have their own Store orders queue that works the same way: pick / check / bill, leftover pending cycles, and billed orders under **Bill ho chuka** (last 7 bill days, newest first). The tab is in the bottom nav for every workflow role so the picker, checker and biller can run the same flow; warehouse manager and picker are the primary users. Admin and dispatch can still create a store order.
+These orders do **not** appear in Meri queue (including Ready for despatch and Pending leftover). They have their own Store orders queue that works the same way: pick / check / bill, leftover pending cycles, and packed orders under **Ready for despatch** (last 7 bill days, newest first; billed orders stay in the queue under **Packing**). The tab is in the bottom nav for every workflow role so the picker, checker and biller can run the same flow; warehouse manager and picker are the primary users. Admin and dispatch can still create a store order.
 
 Frontend sw **im-warehouse-v33**. Backend schema still **20**.
 
@@ -86,3 +88,5 @@ Admin and warehouse manager: bottom nav **Performance** (`#/perf`). Retail Hub s
 On time for punch / pick / check / bill uses the existing bill SLA deadline (receipt + sla_hours, cutoff / open / weekly off / holidays, or purchase grace). Pack and dispatch are operational: on time if finished on the same IST day the order was billed. Pending now and Late now are a live snapshot.
 
 Frontend sw **im-warehouse-v35**. Backend `Code_v35.gs` (paste + new version). Schema still **20** — no new columns.
+
+Frontend sw **im-warehouse-v36**. Backend schema still **20**.

@@ -322,11 +322,12 @@ function qRange(k, d1, d2) {
 function stillInWorkQueue(o) {
   if (!o || o.stage === 'cancelled' || o.stage === 'merged' || o.stage === 'dispatched') return false;
   var stages = (S.m && S.m.stages) || ['new', 'punched', 'allocated', 'picked', 'checked', 'billed', 'packed', 'dispatched', 'cancelled'];
-  var i = stages.indexOf(o.stage), b = stages.indexOf('billed');
-  return i >= 0 && b >= 0 ? i < b : ['new', 'punched', 'allocated', 'picked', 'checked'].indexOf(o.stage) >= 0;
+  var i = stages.indexOf(o.stage), b = stages.indexOf('packed');
+  return i >= 0 && b >= 0 ? i < b : ['new', 'punched', 'allocated', 'picked', 'checked', 'billed'].indexOf(o.stage) >= 0; /* v36: billed stays for packing, packed leaves to Ready for despatch */
 }
+function isReadyStageO(o) { return !!o && (o.stage === 'packed' || o.stage === 'dispatched'); }
 function roleKeepsBilledInQueue() { var r = role(); return r === 'packer' || r === 'dispatch'; }
-/** Bill-date window for Bill ho chuka. Default last 7 days inclusive. Always returns a range so the tab stays fast. */
+/** Bill-date window for Ready for despatch. Default last 7 days inclusive. Always returns a range so the tab stays fast. */
 function billedQRange(k, d1, d2) {
   var t = today();
   switch (k) {
@@ -398,7 +399,7 @@ function vQueue(v) {
   jobs.push(call('pendingLeft').catch(function () { return null; }));
   if (hq.d) jobs.push(call('dealerPending', { dealer_name: hq.d, dealer_src_id: hq.src || '' }).catch(function () { return null; }));
   else jobs.push(Promise.resolve(null));
-  jobs.push(call('billedOrders', { from: br0[0], to: br0[1] }).catch(function (e) { return { error: e, orders: [], count: 0, from: br0[0], to: br0[1] }; }));
+  jobs.push(call('billedOrders', { ready: 1, from: br0[0], to: br0[1] }).catch(function (e) { return { error: e, orders: [], count: 0, from: br0[0], to: br0[1] }; }));
   Promise.all(jobs).then(function (rs) {
     var raw = (rs[0] || []).filter(function (o) { return !isStore(o); }), dupPairs = rs[1], left = rs[2], dealerPend = rs[3], billed = rs[4] || { orders: [], count: 0 };
     if (left && left.orders) {
@@ -408,9 +409,10 @@ function vQueue(v) {
     var list = roleKeepsBilledInQueue() ? raw : raw.filter(stillInWorkQueue);
     var k = LS.getItem('imw_qf') || '', d1 = LS.getItem('imw_qd1') || '', d2 = LS.getItem('imw_qd2') || '';
     var qs = LS.getItem('imw_qs') || '', dq = hq.d || '';
+    if (qs === 'billed') { qs = 'ready'; LS.setItem('imw_qs', qs); }
     var opts = [['', 'Sab dates'], ['today', 'Aaj'], ['yday', 'Kal'], ['week', 'Is hafte'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
     var billedOpts = [['last7', 'Last 7 days'], ['today', 'Aaj'], ['yday', 'Kal'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
-    var stageOpts = [['', 'Sab'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['hold', 'HOLD'], ['dup', '⚠ Duplicates'], ['pending_bill', 'Pending for billing'], ['pending_left', 'Pending leftover'], ['billed', 'Bill ho chuka']];
+    var stageOpts = [['', 'Sab'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['packing', 'Packing'], ['ready', 'Ready for despatch'], ['hold', 'HOLD'], ['dup', '⚠ Duplicates'], ['pending_bill', 'Pending for billing'], ['pending_left', 'Pending leftover']];
 
     v.innerHTML = '<div class="row"><h2>Meri queue (<span id="qn">' + list.length + '</span>)</h2>' + syncBtn() + '</div><p class="small muted">Last sync: ' + tm(S.m.last_sync) + '</p>' +
       '<div class="row"><select id="qf"></select>' +
@@ -425,6 +427,7 @@ function vQueue(v) {
       if (st === 'picking') return o.stage === 'allocated';
       if (st === 'checking') return o.stage === 'picked';
       if (st === 'billing') return o.stage === 'checked';
+      if (st === 'packing') return o.stage === 'billed';
       if (st === 'pending_left') return o.pending_status === 'open' && Number(o.pending_qty) > 0;
       return o.stage === st;
     }
@@ -434,7 +437,7 @@ function vQueue(v) {
       return String(o.dealer_name || '').toUpperCase().indexOf(q) >= 0;
     }
     function syncDateRow() {
-      var billedTab = qs === 'billed';
+      var billedTab = qs === 'ready';
       var curOpts = billedTab ? billedOpts : opts;
       var curK = billedTab ? bk : k, cur1 = billedTab ? bd1 : d1, cur2 = billedTab ? bd2 : d2;
       $('qf').innerHTML = curOpts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === curK ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('');
@@ -446,7 +449,7 @@ function vQueue(v) {
     }
     function applyBilled(res) {
       billed = res || { orders: [], count: 0 };
-      billed.orders = (billed.orders || []).filter(function (o) { return !isStore(o); });
+      billed.orders = (billed.orders || []).filter(function (o) { return !isStore(o) && isReadyStageO(o); });
       billed.count = billed.orders.length;
       if (billed.error && /Unknown action/i.test(String(billed.error.message || billed.error))) billed.needDeploy = true;
     }
@@ -459,26 +462,27 @@ function vQueue(v) {
     function billedShown() { return (billed.orders || []).filter(function (o) { return billedMatch(o, dq); }); }
     function loadBilled(then) {
       var r = billedQRange(bk, bd1, bd2);
-      call('billedOrders', { from: r[0], to: r[1] }).then(function (res) { applyBilled(res); if (then) then(); }).catch(function (e) { applyBilled({ error: e, orders: [], count: 0, from: r[0], to: r[1] }); if (then) then(); });
+      call('billedOrders', { ready: 1, from: r[0], to: r[1] }).then(function (res) { applyBilled(res); if (then) then(); }).catch(function (e) { applyBilled({ error: e, orders: [], count: 0, from: r[0], to: r[1] }); if (then) then(); });
     }
     function drawBilled() {
       var lo = billedShown();
       var r = [billed.from || billedQRange(bk, bd1, bd2)[0], billed.to || billedQRange(bk, bd1, bd2)[1]];
       $('qn').textContent = lo.length;
       var bits = ['Bill date ' + h(dmy(r[0]) || r[0]) + ' se ' + h(dmy(r[1]) || r[1]), 'naye bill pehle'];
+      var rdy = lo.filter(function (o) { return o.stage === 'packed'; }).length;
       if (dq) bits.push('search "' + h(dq) + '"');
       var msg = billed.needDeploy
-        ? 'Server update baaki hai — Bill ho chuka ke liye Code_v32.gs deploy karein. Tab tak billed orders Meri queue ke Sab se hata diye gaye hain.'
-        : (lo.length ? '<b>' + lo.length + '</b> billed orders. Pack / dispatch Delivery tab se, leftover pending Pending leftover se.' : 'Is date range mein koi billed order nahi.');
+        ? 'Server update baaki hai — Ready for despatch ke liye Code_v36.gs deploy karein.'
+        : (lo.length ? '<b>' + lo.length + '</b> orders pack ho chuke (<b>' + rdy + '</b> dispatch baaki). Billed par packing Packing chip se hoti hai.' : 'Is date range mein koi pack hua order nahi.');
       $('qsum').innerHTML = bits.join(' · ') + ': ' + msg + (lo.length ? ' <button type="button" class="sm" id="bex">CSV</button>' : '');
-      $('qlst').innerHTML = lo.length ? lo.map(card).join('') : '<div class="card center muted">' + (billed.needDeploy ? 'Bill ho chuka tab server update ke baad khulega.' : 'Is filter mein koi billed order nahi.') + '</div>';
+      $('qlst').innerHTML = lo.length ? lo.map(card).join('') : '<div class="card center muted">' + (billed.needDeploy ? 'Ready for despatch tab server update ke baad khulega.' : 'Is filter mein koi ready order nahi.') + '</div>';
       if ($('bex')) $('bex').onclick = function () {
-        csv(lo.map(function (o) { return { billed_at: o.billed_at, bill_date: o.billed_at, invoice_no: o.invoice_no, tracking_no: o.track_no, order: o.order_no || o.id, dealer: o.dealer_name, stage: o.stage, pcs: o.pcs, billed_value: o.billed_value }; }), 'bill-ho-chuka');
+        csv(lo.map(function (o) { return { billed_at: o.billed_at, bill_date: o.billed_at, invoice_no: o.invoice_no, tracking_no: o.track_no, order: o.order_no || o.id, dealer: o.dealer_name, stage: o.stage, pcs: o.pcs, billed_value: o.billed_value }; }), 'ready-for-despatch');
       };
     }
     function draw() {
       syncDateRow();
-      if (qs === 'billed') {
+      if (qs === 'ready') {
         var names = {};
         (billed.orders || []).forEach(function (o) { if (o.dealer_name) names[o.dealer_name] = 1; });
         $('qdl_list').innerHTML = Object.keys(names).sort().map(function (n) { return '<option value="' + h(n) + '">'; }).join('');
@@ -496,17 +500,17 @@ function vQueue(v) {
         var n, leftList = (left && left.orders) || [];
         if (s[0] === 'dup') n = shownDups.length;
         else if (s[0] === 'pending_left') n = (dq ? leftList.filter(function (o) { return qDealerOk(o, dq); }) : leftList).length;
-        else if (s[0] === 'billed') n = billedShown().length;
+        else if (s[0] === 'ready') n = billedShown().length;
         else n = mid.filter(function (o) { return qStageOk(o, s[0]); }).length;
         return '<button type="button" class="sm' + (qs === s[0] ? ' primary' : ((s[0] === 'dup' || s[0] === 'pending_left') && n ? ' danger' : '')) + '" data-qs="' + s[0] + '">' + s[1] + ' (' + n + ')</button>';
       }).join('');
       Array.prototype.forEach.call(document.querySelectorAll('#qstages [data-qs]'), function (b) {
-        b.onclick = function () { qs = b.getAttribute('data-qs'); LS.setItem('imw_qs', qs); if (qs === 'billed') loadBilled(draw); else draw(); };
+        b.onclick = function () { qs = b.getAttribute('data-qs'); LS.setItem('imw_qs', qs); if (qs === 'ready') loadBilled(draw); else draw(); };
       });
       var bits = [];
       if (qs !== 'billed' && r) bits.push('Order date ' + h(dmy(r[0] === '0000-00-00' ? '' : r[0]) || '...') + ' se ' + h(dmy(r[1] === '9999-12-31' ? '' : r[1]) || '...'));
       if (dq && qs !== 'billed') bits.push('dealer "' + h(dq) + '"');
-      if (qs === 'billed') { drawBilled(); return; }
+      if (qs === 'ready') { drawBilled(); return; }
       if (qs === 'dup') {
         var oc = shownDups.reduce(function (a, g) { return a + g.orders.length; }, 0);
         $('qn').textContent = shownDups.length + (r || dq || qs ? ' / ' + list.length : '');
@@ -534,7 +538,7 @@ function vQueue(v) {
       $('qn').textContent = f.length + (r || dq || qs ? ' / ' + list.length : '');
       $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : 'Sab: ') + '<b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>' +
         (canMark ? ' · <button type="button" class="sm primary" id="qmd">Mark duplicate</button> <span class="small muted">2+ orders select karke mark karein</span>' : '');
-      $('qlst').innerHTML = pendHead + (f.length ? f.map(function (o) { return card(o, canMark); }).join('') : (pendHead ? '' : '<div class="card center muted">' + ((r || dq || qs) ? 'Is filter mein koi order nahi.' : 'Abhi koi kaam nahi. Bill ho chuke orders Bill ho chuka tab mein hain.') + '</div>'));
+      $('qlst').innerHTML = pendHead + (f.length ? f.map(function (o) { return card(o, canMark); }).join('') : (pendHead ? '' : '<div class="card center muted">' + ((r || dq || qs) ? 'Is filter mein koi order nahi.' : 'Abhi koi kaam nahi. Pack ho chuke orders Ready for despatch tab mein hain.') + '</div>'));
       Array.prototype.forEach.call(v.querySelectorAll('[data-pex]'), function (b) { b.onclick = function () { var id = Number(b.getAttribute('data-pex')); var o = ((dealerPend && dealerPend.open) || []).filter(function (x) { return Number(x.id) === id; })[0]; if (o) openPendingExec(o, function () { vQueue(v); }); }; });
       if (canMark && $('qmd')) $('qmd').onclick = function () {
         var ids = Array.prototype.map.call(v.querySelectorAll('.qsel:checked'), function (x) { return Number(x.dataset.id); });
@@ -544,7 +548,7 @@ function vQueue(v) {
       };
     }
     $('qf').onchange = function () {
-      if (qs === 'billed') {
+      if (qs === 'ready') {
         bk = this.value; LS.setItem('imw_bqf', bk);
         if ((bk === 'date' || bk === 'range') && !bd1) { bd1 = today(); $('qd1').value = bd1; LS.setItem('imw_bqd1', bd1); }
         loadBilled(draw);
@@ -555,11 +559,11 @@ function vQueue(v) {
       }
     };
     $('qd1').onchange = function () {
-      if (qs === 'billed') { bd1 = this.value; LS.setItem('imw_bqd1', bd1); loadBilled(draw); }
+      if (qs === 'ready') { bd1 = this.value; LS.setItem('imw_bqd1', bd1); loadBilled(draw); }
       else { d1 = this.value; LS.setItem('imw_qd1', d1); draw(); }
     };
     $('qd2').onchange = function () {
-      if (qs === 'billed') { bd2 = this.value; LS.setItem('imw_bqd2', bd2); loadBilled(draw); }
+      if (qs === 'ready') { bd2 = this.value; LS.setItem('imw_bqd2', bd2); loadBilled(draw); }
       else { d2 = this.value; LS.setItem('imw_qd2', d2); draw(); }
     };
     if ($('qdl') && dq) $('qdl').value = dq;
@@ -1085,7 +1089,7 @@ function vStoreQueue(v) {
   var jobs = [
     call('storeOrders', {}),
     call('pendingLeft', { store: 1 }).catch(function () { return null; }),
-    call('billedOrders', { store: 1, from: br0[0], to: br0[1] }).catch(function (e) { return { error: e, orders: [], count: 0, from: br0[0], to: br0[1] }; })
+    call('billedOrders', { store: 1, ready: 1, from: br0[0], to: br0[1] }).catch(function (e) { return { error: e, orders: [], count: 0, from: br0[0], to: br0[1] }; })
   ];
   Promise.all(jobs).then(function (rs) {
     var raw = (rs[0] || []).filter(isStore);
@@ -1098,13 +1102,13 @@ function vStoreQueue(v) {
     var billed = rs[2] || { orders: [], count: 0 };
     var k = LS.getItem('imw_sqf') || '', d1 = LS.getItem('imw_sqd1') || '', d2 = LS.getItem('imw_sqd2') || '';
     var qs = LS.getItem('imw_sqs') || '', stn = LS.getItem('imw_sqst') || '', sq = '';
-    if (qs === 'ready') { qs = 'billed'; LS.setItem('imw_sqs', qs); }
+    if (qs === 'billed') { qs = 'ready'; LS.setItem('imw_sqs', qs); }
     var opts = [['', 'Sab dates'], ['today', 'Aaj'], ['yday', 'Kal'], ['week', 'Is hafte'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
     var billedOpts = [['last7', 'Last 7 days'], ['today', 'Aaj'], ['yday', 'Kal'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
-    var stageOpts = [['', 'Sab'], ['new', 'Naye'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['hold', 'HOLD'], ['nophoto', 'Photo baaki'], ['pending_bill', 'Pending for billing'], ['pending_left', 'Pending leftover'], ['billed', 'Bill ho chuka']];
+    var stageOpts = [['', 'Sab'], ['new', 'Naye'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['packing', 'Packing'], ['ready', 'Ready for despatch'], ['hold', 'HOLD'], ['nophoto', 'Photo baaki'], ['pending_bill', 'Pending for billing'], ['pending_left', 'Pending leftover']];
 
     v.innerHTML = '<div class="row"><h2>Store orders (<span id="sqn">' + list.length + '</span>)</h2>' + syncBtn() + (canNew() ? '<button class="primary" style="flex:0;white-space:nowrap" onclick="location.hash=\'#/sq/new\'">+ Store order</button>' : '') + '</div>' +
-      '<p class="small muted">Sirf Karwa Marketing (Intimissi) store orders. Meri queue jaisa pick / check / bill flow. Bill ho chuke yahan Bill ho chuka mein jaate hain, Meri queue mein nahi. Last sync: ' + tm(S.m.last_sync) + '</p>' +
+      '<p class="small muted">Sirf Karwa Marketing (Intimissi) store orders. Meri queue jaisa pick / check / bill / pack flow. Pack hone ke baad order Ready for despatch mein jaata hai, Meri queue mein nahi. Last sync: ' + tm(S.m.last_sync) + '</p>' +
       '<div class="row"><select id="sqf"></select>' +
       '<input type="date" id="sqd1" title="Date / From"><input type="date" id="sqd2" title="To"></div>' +
       '<div class="row" style="margin-top:8px;flex-wrap:wrap;gap:6px"><select id="sqst" style="flex:0"><option value="">Sab stores</option>' + storeList().map(function (x) { return '<option value="' + h(x) + '"' + (x === stn ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select>' +
@@ -1119,9 +1123,10 @@ function vStoreQueue(v) {
       if (st === 'picking') return o.stage === 'allocated';
       if (st === 'checking') return o.stage === 'picked';
       if (st === 'billing') return o.stage === 'checked';
+      if (st === 'packing') return o.stage === 'billed';
       if (st === 'pending_bill') return o.stage !== 'cancelled' && o.stage !== 'dispatched' && ['new', 'punched', 'allocated', 'picked', 'checked'].indexOf(o.stage) >= 0;
       if (st === 'pending_left') return o.pending_status === 'open' && Number(o.pending_qty) > 0;
-      if (st === 'billed' || st === 'ready') return o.stage === 'billed' || o.stage === 'packed' || o.stage === 'dispatched';
+      if (st === 'ready') return isReadyStageO(o);
       return o.stage === st;
     }
     function storeMatch(o, storeName, q) {
@@ -1139,7 +1144,7 @@ function vStoreQueue(v) {
       return c.replace(/<\/div>\s*$/, '<div class="small" style="margin-top:4px">🏬 <b>' + h(storeOf(o)) + '</b> ' + photoFlags(o) + '</div></div>');
     }
     function syncDateRow() {
-      var billedTab = qs === 'billed';
+      var billedTab = qs === 'ready';
       var curOpts = billedTab ? billedOpts : opts;
       var curK = billedTab ? bk : k, cur1 = billedTab ? bd1 : d1, cur2 = billedTab ? bd2 : d2;
       $('sqf').innerHTML = curOpts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === curK ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('');
@@ -1151,7 +1156,7 @@ function vStoreQueue(v) {
     }
     function applyBilled(res) {
       billed = res || { orders: [], count: 0 };
-      billed.orders = (billed.orders || []).filter(isStore);
+      billed.orders = (billed.orders || []).filter(function (o) { return isStore(o) && isReadyStageO(o); });
       billed.count = billed.orders.length;
       if (billed.error && /Unknown action/i.test(String(billed.error.message || billed.error))) billed.needDeploy = true;
     }
@@ -1159,7 +1164,7 @@ function vStoreQueue(v) {
     function billedShown() { return (billed.orders || []).filter(function (o) { return storeMatch(o, stn, sq); }); }
     function loadBilled(then) {
       var r = billedQRange(bk, bd1, bd2);
-      call('billedOrders', { store: 1, from: r[0], to: r[1] }).then(function (res) { applyBilled(res); if (then) then(); }).catch(function (e) { applyBilled({ error: e, orders: [], count: 0, from: r[0], to: r[1] }); if (then) then(); });
+      call('billedOrders', { store: 1, ready: 1, from: r[0], to: r[1] }).then(function (res) { applyBilled(res); if (then) then(); }).catch(function (e) { applyBilled({ error: e, orders: [], count: 0, from: r[0], to: r[1] }); if (then) then(); });
     }
     function bindPex(rows) {
       Array.prototype.forEach.call(v.querySelectorAll('[data-pex]'), function (b) {
@@ -1178,12 +1183,12 @@ function vStoreQueue(v) {
       if (stn) bits.push('store ' + h(stn));
       if (sq) bits.push('search "' + h(sq) + '"');
       var msg = billed.needDeploy
-        ? 'Server update baaki hai — Bill ho chuka ke liye Code_v33.gs deploy karein.'
-        : (lo.length ? '<b>' + lo.length + '</b> billed store orders.' : 'Is date range mein koi billed store order nahi.');
+        ? 'Server update baaki hai — Ready for despatch ke liye Code_v36.gs deploy karein.'
+        : (lo.length ? '<b>' + lo.length + '</b> store orders pack ho chuke (<b>' + lo.filter(function (o) { return o.stage === 'packed'; }).length + '</b> dispatch baaki).' : 'Is date range mein koi pack hua store order nahi.');
       $('sqsum').innerHTML = bits.join(' · ') + ': ' + msg + (lo.length ? ' <button type="button" class="sm" id="sbex">CSV</button>' : '');
-      $('sqlst').innerHTML = lo.length ? lo.map(scard).join('') : '<div class="card center muted">' + (billed.needDeploy ? 'Bill ho chuka tab server update ke baad khulega. Tab tak billed store orders Sab list se hata diye gaye hain.' : 'Is filter mein koi billed store order nahi.') + '</div>';
+      $('sqlst').innerHTML = lo.length ? lo.map(scard).join('') : '<div class="card center muted">' + (billed.needDeploy ? 'Ready for despatch tab server update ke baad khulega.' : 'Is filter mein koi ready store order nahi.') + '</div>';
       if ($('sbex')) $('sbex').onclick = function () {
-        csv(lo.map(function (o) { return { billed_at: o.billed_at, invoice_no: o.invoice_no, tracking_no: o.track_no, order: o.order_no || o.id, store: storeOf(o), dealer: o.dealer_name, stage: o.stage, pcs: o.pcs, billed_value: o.billed_value }; }), 'store-bill-ho-chuka');
+        csv(lo.map(function (o) { return { billed_at: o.billed_at, invoice_no: o.invoice_no, tracking_no: o.track_no, order: o.order_no || o.id, store: storeOf(o), dealer: o.dealer_name, stage: o.stage, pcs: o.pcs, billed_value: o.billed_value }; }), 'store-ready-for-despatch');
       };
     }
     function draw() {
@@ -1195,18 +1200,18 @@ function vStoreQueue(v) {
       $('sqstages').innerHTML = stageOpts.map(function (s) {
         var n;
         if (s[0] === 'pending_left') n = leftList.length;
-        else if (s[0] === 'billed') n = billedShown().length;
+        else if (s[0] === 'ready') n = billedShown().length;
         else n = mid.filter(function (o) { return stOk(o, s[0]); }).length;
         return '<button type="button" class="sm' + (qs === s[0] ? ' primary' : ((s[0] === 'pending_left' || s[0] === 'nophoto') && n ? ' danger' : '')) + '" data-sqs="' + s[0] + '">' + s[1] + ' (' + n + ')</button>';
       }).join('');
       Array.prototype.forEach.call(document.querySelectorAll('#sqstages [data-sqs]'), function (b) {
-        b.onclick = function () { qs = b.getAttribute('data-sqs'); LS.setItem('imw_sqs', qs); if (qs === 'billed') loadBilled(draw); else draw(); };
+        b.onclick = function () { qs = b.getAttribute('data-sqs'); LS.setItem('imw_sqs', qs); if (qs === 'ready') loadBilled(draw); else draw(); };
       });
       var bits = [];
       if (qs !== 'billed' && r) bits.push('Order date ' + h(dmy(r[0] === '0000-00-00' ? '' : r[0]) || '...') + ' se ' + h(dmy(r[1] === '9999-12-31' ? '' : r[1]) || '...'));
       if (stn) bits.push('store ' + h(stn));
       if (sq && qs !== 'billed') bits.push('search "' + h(sq) + '"');
-      if (qs === 'billed') { drawBilled(); return; }
+      if (qs === 'ready') { drawBilled(); return; }
       if (qs === 'pending_left') {
         $('sqn').textContent = leftList.length;
         $('sqsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : '') + '<b>' + leftList.length + '</b> store orders with leftover pending, <b>' + pcs(leftList.reduce(function (a, o) { return a + (Number(o.pending_qty) || 0); }, 0)) + ' baaki</b>. Pending executed se yahi order picking par wapas jaata hai.';
@@ -1220,12 +1225,12 @@ function vStoreQueue(v) {
       $('sqsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : 'Sab: ') + '<b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>';
       var empty = list.length
         ? 'Is filter mein koi store order nahi.'
-        : (canNew() ? 'Abhi koi store order nahi. Store se order aaye to upar "+ Store order" dabayein, store chunein, brand aur pcs daalein, aur teen photo lagayein: order, pending page, execution page. Bill ho chuke orders Bill ho chuka tab mein hain.' : 'Abhi aapke liye koi store order nahi. Bill ho chuke orders Bill ho chuka tab mein hain.');
+        : (canNew() ? 'Abhi koi store order nahi. Store se order aaye to upar "+ Store order" dabayein, store chunein, brand aur pcs daalein, aur teen photo lagayein: order, pending page, execution page. Pack ho chuke orders Ready for despatch tab mein hain.' : 'Abhi aapke liye koi store order nahi. Pack ho chuke orders Ready for despatch tab mein hain.');
       $('sqlst').innerHTML = f.length ? f.map(scard).join('') : '<div class="card center muted">' + empty + '</div>';
       bindPex(f);
     }
     $('sqf').onchange = function () {
-      if (qs === 'billed') {
+      if (qs === 'ready') {
         bk = this.value; LS.setItem('imw_sbqf', bk);
         if ((bk === 'date' || bk === 'range') && !bd1) { bd1 = today(); $('sqd1').value = bd1; LS.setItem('imw_sbqd1', bd1); }
         loadBilled(draw);
@@ -1236,11 +1241,11 @@ function vStoreQueue(v) {
       }
     };
     $('sqd1').onchange = function () {
-      if (qs === 'billed') { bd1 = this.value; LS.setItem('imw_sbqd1', bd1); loadBilled(draw); }
+      if (qs === 'ready') { bd1 = this.value; LS.setItem('imw_sbqd1', bd1); loadBilled(draw); }
       else { d1 = this.value; LS.setItem('imw_sqd1', d1); draw(); }
     };
     $('sqd2').onchange = function () {
-      if (qs === 'billed') { bd2 = this.value; LS.setItem('imw_sbqd2', bd2); loadBilled(draw); }
+      if (qs === 'ready') { bd2 = this.value; LS.setItem('imw_sbqd2', bd2); loadBilled(draw); }
       else { d2 = this.value; LS.setItem('imw_sqd2', d2); draw(); }
     };
     $('sqst').onchange = function () { stn = this.value; LS.setItem('imw_sqst', stn); draw(); };
