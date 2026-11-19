@@ -843,7 +843,7 @@ function vOrder(v, id) {
     if (mine) {
       if (nx === 'allocate') act = '<div class="grid2"><div>' + whoSel('w_picker', 'picker', o.picker_name, 'Pick kaun karega') + '</div><div>' + whoSel('w_checker', 'checker', o.checker_name, 'Check kaun karega') + '</div><div>' + whoSel('w_biller', 'biller', o.biller_name, 'Bill kaun karega') + '</div><div>' + whoSel('w_packer', 'packer', o.packer_name, 'Pack kaun karega') + '</div></div>';
       else act = whoSel('w_done', STEP_ROLE[nx][0], o[STEP_ROLE[nx][1]] || (role() === STEP_ROLE[nx][0] ? S.user.name : ''), 'Kisne kiya (naam)');
-      if (nx === 'bill') act += '<div class="grid2"><div><label>Invoice no' + (cyc ? ' (is leftover cycle ka)' : '') + '</label><input id="inv"></div><div><label>Billed qty (pcs)</label><input id="bq" type="number" value="' + h(cyc ? (cyc.qty || cyc.planned_qty) : o.picked_qty) + '"></div></div>' + (cyc && o.invoice_no ? '<p class="small muted">Pehla invoice ' + h(o.invoice_no) + ' nahi badlega. Yeh naya bill is cycle par lagega.</p>' : '');
+      if (nx === 'bill') act += '<div class="grid2"><div><label>Invoice no' + (cyc ? ' (is leftover cycle ka)' : '') + '</label><input id="inv"></div><div><label>Billed qty (pcs)</label><input id="bq" type="number" value="' + h(cyc ? (cyc.qty || cyc.planned_qty) : o.picked_qty) + '"></div></div>' + (cyc && o.invoice_no ? '<p class="small muted">Pehla invoice ' + h(o.invoice_no) + ' nahi badlega. Yeh naya bill is cycle par lagega.</p>' : '') + (isStore(o) ? '<div class="card" style="margin:6px 0"><label><b>Pending page</b>' + (o.photo_pending_id ? ' <span class="small" style="color:#1e7e34">(lagi hui hai, nayi chunein to badal jayegi)</span>' : ' *') + '</label><input type="file" accept="image/*" capture="environment" data-ph="pending"><div class="small muted" id="phs_pending"></div><img id="phv_pending" style="max-width:160px;max-height:160px;display:none;margin-top:6px;border:1px solid var(--line)"></div>' : '');
       if (nx === 'pack') act += '<label>Kitne boxes</label><input id="bx" type="number" min="1">';
       act += '<button class="good big" id="stepb" style="margin-top:10px">✔ ' + STEPS.filter(function (s) { return s[0] === nx; })[0][3] + ' confirm</button>';
     }
@@ -858,6 +858,8 @@ function vOrder(v, id) {
       (o.stage === 'cancelled' ? '<div class="short">Cancel: ' + h(o.cancel_reason) + ' (' + tm(o.cancelled_at) + ', ' + h(o.cancelled_by) + ')</div>' : '') +
       (manEdit ? '<div class="row" style="margin-top:8px"><a class="btn sm" href="#/' + (isStore(o) ? 'sq/' : '') + 'edit/' + o.id + '">✏️ Edit</a><button class="sm danger" id="cnl">Cancel order</button></div>' : '') + '</div>' +
       (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + dupCard(o, r.dup_orders) + (o.merged_into ? '<div class="card short">Ye order duplicate tha, <a href="#/o/' + h(o.merged_into) + '">' + h((o.merged_into_order && (o.merged_into_order.track_no || o.merged_into_order.order_no)) || '#' + o.merged_into) + '</a> mein merge hua (' + tm(o.merged_at) + ', ' + h(o.merged_by) + ')</div>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + (cyc ? '<p class="small short">Leftover cycle chal raha hai — ab ' + h(stageLbl(o.stage)) + (cyc.picker_name ? ', picker ' + h(cyc.picker_name) : '') + '. Pehli pick / bill history same rehti hai.</p>' : '') + tl + act + '</div>' + pendingExecCard(o) + waitCard(o) + planCard(o) + hold + del + nb;
+    var billPhotos = {};
+    if (mine && nx === 'bill' && isStore(o)) bindPhotoInputs(billPhotos);
     var b = $('stepb'); if (b) b.onclick = function () {
       var d = { id: o.id, action: nx };
       if (nx === 'allocate') {
@@ -867,7 +869,12 @@ function vOrder(v, id) {
       if (nx === 'pick') { d.picked = {}; Array.prototype.forEach.call(document.querySelectorAll('.pq'), function (i) { d.picked[i.dataset.id] = i.value; }); }
       if (nx === 'bill') { d.invoice_no = val('inv'); d.billed_qty = val('bq'); }
       if (nx === 'pack') d.boxes = val('bx');
-      call('step', d).then(function () { toast('Ho gaya ✔'); vOrder(v, id); }).catch(fail);
+      function goStep() { return call('step', d).then(function () { toast('Ho gaya ✔'); vOrder(v, id); }).catch(function (e) { if (b) b.disabled = false; fail(e); }); }
+      if (nx === 'bill' && isStore(o)) {
+        if (!billPhotos.pending && !o.photo_pending_id) return toast('Pending page ki photo lagayein', 'err');
+        if (billPhotos.pending) { b.disabled = true; return uploadPhoto(o.id, 'pending', billPhotos.pending).then(goStep).catch(function (e) { b.disabled = false; fail(e); }); }
+      }
+      goStep();
     };
     if ($('cnl')) $('cnl').onclick = function () { var why = prompt('Cancel ka reason?'); if (!why) return; call('cancelOrder', { id: o.id, reason: why }).then(function () { toast('Cancel ho gaya'); vOrder(v, id); }).catch(fail); };
     if ($('oas')) $('oas').onclick = function () { call('orderArea', { id: o.id, zone: val('oz'), area: val('oa'), route: val('or') }).then(function () { S.dl = null; toast('Saved'); vOrder(v, id); }).catch(fail); };
@@ -1034,16 +1041,39 @@ function loadUm() {
 // ---------------- new / edit manual order
 var BRANDS = ['TRYLO', 'C9', 'OS'];
 
-// ---------------- Karwa Marketing Store orders (warehouse types the store's paper order + 3 photos)
+// ---------------- Karwa Marketing Store orders (order photo at create, pending page at billing)
 var STORE_SRC = 'Karwa Marketing Store';
 var STORE_FALLBACK = ['Kamla Nagar', 'Rohini City Centre', 'V3S', 'Burari', 'Mahagun Mall Ghaziabad', 'Elan Epic Gurgaon', 'Pacific Mall Anand Vihar', 'Mukherjee Nagar', 'H&S Mall Boulevard Walk Greater Noida West'];
 var PHOTO_KINDS = [['order', 'Order photo'], ['pending', 'Pending page'], ['exec', 'Execution page']];
+var PHOTO_CREATE_KINDS = [['order', 'Order photo']];
 function isStore(o) { return o && o.source === STORE_SRC; }
 function storeList() { return (S.m && S.m.stores) || STORE_FALLBACK; }
 function storeOf(o) { return o.store_name || o.dealer_name; }
+function photoOf(o) { return (o && o.photos) || { order: o && o.photo_order_id ? 1 : 0, pending: o && o.photo_pending_id ? 1 : 0, exec: o && o.photo_exec_id ? 1 : 0 }; }
+function storeIsBilled(o) { return !!(o && (o.invoice_no || o.billed_at || ['billed', 'packed', 'dispatched'].indexOf(o.stage) >= 0)); }
+/** Missing required photos: order photo always, pending page after bill. Exec is never required. */
+function storePhotoMissing(o) {
+  var ph = photoOf(o), miss = [];
+  if (!ph.order) miss.push('order');
+  if (storeIsBilled(o) && !ph.pending) miss.push('pending');
+  return miss;
+}
+function photoShowKinds(o) {
+  var ph = photoOf(o);
+  return PHOTO_KINDS.filter(function (k) {
+    if (k[0] === 'order') return true;
+    if (k[0] === 'pending') return storeIsBilled(o) || !!ph.pending;
+    return !!ph[k[0]];
+  });
+}
 function photoFlags(o) {
-  var ph = o.photos || { order: o.photo_order_id ? 1 : 0, pending: o.photo_pending_id ? 1 : 0, exec: o.photo_exec_id ? 1 : 0 };
-  return PHOTO_KINDS.map(function (k) { return ph[k[0]] ? '<span class="pill" style="background:#e6f4ea;color:#1e7e34">✔ ' + k[1] + '</span>' : '<span class="pill" style="background:#fdecea;color:#c0392b">✖ ' + k[1] + ' nahi</span>'; }).join(' ');
+  var ph = photoOf(o);
+  return photoShowKinds(o).map(function (k) { return ph[k[0]] ? '<span class="pill" style="background:#e6f4ea;color:#1e7e34">✔ ' + k[1] + '</span>' : '<span class="pill" style="background:#fdecea;color:#c0392b">✖ ' + k[1] + ' nahi</span>'; }).join(' ');
+}
+function canEditStorePhoto(k, have) {
+  if (k === 'order') return canNew();
+  if (k === 'exec') return canNew() && !!(have && have.exec);
+  return canNew() || ['admin', 'warehouse_manager', 'biller'].indexOf(role()) >= 0;
 }
 /** Resize to max edge 1600px, JPEG q 0.7. Resolves {mime, b64, url}. */
 function compressImg(file) {
@@ -1063,8 +1093,8 @@ function compressImg(file) {
   });
 }
 function uploadPhoto(id, kind, ph) { return call('uploadStorePhoto', { order_id: id, kind: kind, mime: ph.mime, b64: ph.b64 }); }
-function photoInputs(have) {
-  return PHOTO_KINDS.map(function (k) { return '<div class="card" style="margin:6px 0"><label><b>' + k[1] + '</b>' + (have && have[k[0]] ? ' <span class="small" style="color:#1e7e34">(lagi hui hai, nayi chunein to badal jayegi)</span>' : ' *') + '</label>' +
+function photoInputs(have, kinds) {
+  return (kinds || PHOTO_CREATE_KINDS).map(function (k) { return '<div class="card" style="margin:6px 0"><label><b>' + k[1] + '</b>' + (have && have[k[0]] ? ' <span class="small" style="color:#1e7e34">(lagi hui hai, nayi chunein to badal jayegi)</span>' : ' *') + '</label>' +
     '<input type="file" accept="image/*" capture="environment" data-ph="' + k[0] + '"><div class="small muted" id="phs_' + k[0] + '"></div><img id="phv_' + k[0] + '" style="max-width:160px;max-height:160px;display:none;margin-top:6px;border:1px solid var(--line)"></div>'; }).join('');
 }
 function bindPhotoInputs(store) {
@@ -1082,7 +1112,7 @@ function uploadAll(id, store) {
   var bad = [];
   return Object.keys(store).reduce(function (p, k) { return p.then(function () { return uploadPhoto(id, k, store[k]).catch(function () { bad.push(k); }); }); }, Promise.resolve()).then(function () { return bad; });
 }
-function kindLbl(k) { return PHOTO_KINDS.filter(function (x) { return x[0] === k; })[0][1]; }
+function kindLbl(k) { var x = PHOTO_KINDS.filter(function (x) { return x[0] === k; })[0]; return x ? x[1] : k; }
 function vStoreQueue(v) {
   var bk = LS.getItem('imw_sbqf') || 'last7', bd1 = LS.getItem('imw_sbqd1') || '', bd2 = LS.getItem('imw_sbqd2') || '';
   var br0 = billedQRange(bk, bd1, bd2);
@@ -1118,7 +1148,7 @@ function vStoreQueue(v) {
     function stOk(o, st) {
       if (!st) return true;
       if (st === 'hold') return !!Number(o.hold);
-      if (st === 'nophoto') { var p = o.photos || {}; return !(p.order && p.pending && p.exec); }
+      if (st === 'nophoto') return storePhotoMissing(o).length > 0;
       if (st === 'new') return o.stage === 'new' || o.stage === 'punched';
       if (st === 'picking') return o.stage === 'allocated';
       if (st === 'checking') return o.stage === 'picked';
@@ -1225,7 +1255,7 @@ function vStoreQueue(v) {
       $('sqsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : 'Sab: ') + '<b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>';
       var empty = list.length
         ? 'Is filter mein koi store order nahi.'
-        : (canNew() ? 'Abhi koi store order nahi. Store se order aaye to upar "+ Store order" dabayein, store chunein, brand aur pcs daalein, aur teen photo lagayein: order, pending page, execution page. Pack ho chuke orders Ready for despatch tab mein hain.' : 'Abhi aapke liye koi store order nahi. Pack ho chuke orders Ready for despatch tab mein hain.');
+        : (canNew() ? 'Abhi koi store order nahi. Store se order aaye to upar "+ Store order" dabayein, store chunein, brand aur pcs daalein, aur Order photo lagayein. Pending page bill ke time lagenge. Pack ho chuke orders Ready for despatch tab mein hain.' : 'Abhi aapke liye koi store order nahi. Pack ho chuke orders Ready for despatch tab mein hain.');
       $('sqlst').innerHTML = f.length ? f.map(scard).join('') : '<div class="card center muted">' + empty + '</div>';
       bindPex(f);
     }
@@ -1264,7 +1294,7 @@ function vStoreNew(v, ed) {
     '<div class="card"><div class="grid2"><div><label>Order kisne liya (taken by)</label><input id="tb" value="' + h(ed ? ed.taken_by : S.user.name) + '"></div><div><label>Priority</label><select id="pri">' + S.m.priorities.map(function (x) { return '<option' + (ed && ed.priority === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></div>' +
     '<div><label>Expected dispatch date (optional)</label><input id="exd" type="date" value="' + h(ed ? ed.expected_date : '') + '"></div><div><label>Source</label><input value="' + STORE_SRC + '" disabled></div></div></div>' +
     '<div class="card"><h3>Brand / items</h3><div id="lns"></div><button class="sm" id="al">+ Brand line</button><div class="small muted" id="tot"></div></div>' +
-    '<div class="card"><h3>Photos</h3><p class="small muted">Phone par camera khulega, computer par file chunein. Photo apne aap chhoti ho jaati hai.</p>' + photoInputs(have) + '</div>' +
+    '<div class="card"><h3>Photos</h3><p class="small muted">Order banate time sirf Order photo zaroori hai. Pending page bill ke time lagenge. Phone par camera khulega, computer par file chunein.</p>' + photoInputs(have, PHOTO_CREATE_KINDS) + '</div>' +
     '<div class="card"><label>Remarks (optional)</label><textarea id="rm" rows="2">' + h(ed ? ed.remarks : '') + '</textarea></div><button class="primary big" id="sv">' + (ed ? 'Save changes' : 'Store order banayein') + '</button>';
   function readLines() { lines = Array.prototype.map.call(document.querySelectorAll('.ln'), function (r) { return { brand: r.querySelector('.lb').value, item: r.querySelector('.li').value, qty: r.querySelector('.lq').value }; }); }
   function total() { readLines(); $('tot').textContent = 'Total: ' + lines.reduce(function (a, l) { return a + (Number(l.qty) || 0); }, 0) + ' pcs'; }
@@ -1277,26 +1307,26 @@ function vStoreNew(v, ed) {
   drawLines(); bindPhotoInputs(photos);
   $('sv').onclick = function () {
     readLines(); var st = val('sst'); if (!st) return toast('Store chunein', 'err');
-    var miss = PHOTO_KINDS.filter(function (k) { return !photos[k[0]] && !(have && have[k[0]]); });
+    var miss = PHOTO_CREATE_KINDS.filter(function (k) { return !photos[k[0]] && !(have && have[k[0]]); });
     if (!ed && miss.length) return toast(miss.map(function (k) { return k[1]; }).join(', ') + ' ki photo lagayein', 'err');
     var d = { store: st, source: STORE_SRC, priority: val('pri'), taken_by: val('tb'), expected_date: val('exd'), remarks: val('rm'), lines: lines };
     var btn = $('sv'); btn.disabled = true;
     var save = ed ? call('editOrder', Object.assign(d, { id: ed.id })).then(function () { return { id: ed.id }; }) : call('createStoreOrder', d);
     save.then(function (r) {
-      var id = r.id; if (!ed) toast((r.track_no ? r.track_no + ' / ' : '') + r.order_no + ' ban gaya, photos upload ho rahi hain...');
+      var id = r.id; if (!ed) toast((r.track_no ? r.track_no + ' / ' : '') + r.order_no + ' ban gaya, order photo upload ho rahi hai...');
       return uploadAll(id, photos).then(function (bad) {
-        if (bad.length) toast('Order save hai, par ' + bad.map(kindLbl).join(', ') + ' upload nahi hui. Order page se dobara lagayein.', 'err'); else toast(ed ? 'Saved' : 'Store order aur photos save ho gaye ✔');
+        if (bad.length) toast('Order save hai, par ' + bad.map(kindLbl).join(', ') + ' upload nahi hui. Order page se dobara lagayein.', 'err'); else toast(ed ? 'Saved' : 'Store order aur order photo save ho gayi ✔');
         S.dl = null; go('/o/' + id);
       });
     }).catch(function (e) { btn.disabled = false; fail(e); });
   };
 }
-/** Order detail: 3 photos with view + add / replace. Photo bytes are fetched only when tapped. */
+/** Order detail: required / existing photos with view + add / replace. Old execution photos still show. Photo bytes are fetched only when tapped. */
 function storePhotosCard(v, o) {
   var have = { order: o.photo_order_id, pending: o.photo_pending_id, exec: o.photo_exec_id }, box = document.createElement('div'); box.className = 'card';
   box.innerHTML = '<h3>🏬 Store order: ' + h(storeOf(o)) + '</h3><div class="small" style="margin-bottom:6px">' + photoFlags(o) + '</div>' +
-    PHOTO_KINDS.map(function (k) { return '<div class="chk"><b style="flex:1">' + k[1] + '</b>' + (have[k[0]] ? '<button class="sm" data-pv="' + k[0] + '">Dekhein</button>' : '<span class="small short">Nahi lagi</span>') +
-      (canNew() ? '<label class="btn sm" style="flex:0;white-space:nowrap">' + (have[k[0]] ? 'Badlein' : '+ Lagayein') + '<input type="file" accept="image/*" capture="environment" data-pu="' + k[0] + '" style="display:none"></label>' : '') + '</div>'; }).join('');
+    photoShowKinds(o).map(function (k) { return '<div class="chk"><b style="flex:1">' + k[1] + '</b>' + (have[k[0]] ? '<button class="sm" data-pv="' + k[0] + '">Dekhein</button>' : '<span class="small short">Nahi lagi</span>') +
+      (canEditStorePhoto(k[0], have) ? '<label class="btn sm" style="flex:0;white-space:nowrap">' + (have[k[0]] ? 'Badlein' : '+ Lagayein') + '<input type="file" accept="image/*" capture="environment" data-pu="' + k[0] + '" style="display:none"></label>' : '') + '</div>'; }).join('');
   v.insertBefore(box, v.children[1] || null);
   Array.prototype.forEach.call(box.querySelectorAll('[data-pv]'), function (b) { b.onclick = function () {
     var k = b.dataset.pv; call('getStorePhoto', { order_id: o.id, kind: k }).then(function (r) { sheet('<h3>' + kindLbl(k) + '</h3><img src="data:' + h(r.mime) + ';base64,' + r.b64 + '" style="width:100%;height:auto">'); }).catch(fail);
