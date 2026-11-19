@@ -884,6 +884,40 @@ function pendingExecCard(o) {
     ((p.lines || []).length ? '<div class="small">' + p.lines.map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ': baaki ' + pcs(l.remaining) + (l.opening != null ? ' (opening ' + pcs(l.opening) : '') + (l.opening != null ? ')' : ''); }).join('<br>') + '</div>' : '') +
     btn + '<h3 style="margin-top:12px">Execution history</h3>' + hist + '</div>';
 }
+// ---------------- admin order qty edit (v38): any stage before dispatch, audit in order log (qty_edit)
+function canAdminQtyEdit(o, cyc) { return isAdmin() && !!o && ['dispatched', 'cancelled', 'merged'].indexOf(o.stage) < 0 && !o.dispatched_at && !o.merged_into && !cyc && (o.lines || []).length > 0; }
+function qtyEditHistory(log) {
+  var rows = (log || []).filter(function (x) { return x.action === 'qty_edit' || x.action === 'lines' || x.action === 'edit'; });
+  if (!rows.length) return '';
+  rows = rows.slice().sort(function (a, b) { return String(a.at) < String(b.at) ? 1 : String(a.at) > String(b.at) ? -1 : 0; });
+  return '<h3 style="margin-top:12px">Qty / edit history</h3><ul class="tl">' + rows.map(function (x) {
+    var what = x.action === 'qty_edit' ? 'Qty badli (admin)' : x.action === 'lines' ? 'Order qty save' : 'Order edit';
+    return '<li class="done"><b>' + what + '</b> <span class="small">' + h(x.note || '') + '</span><div class="small muted">' + tm(x.at) + ' • ' + h(x.by_name || '') + '</div></li>';
+  }).join('') + '</ul>';
+}
+function openQtyEdit(o, ondone) {
+  var rows = (o.lines || []).map(function (l) {
+    return '<tr><td>' + h(l.brand) + (l.item ? ' ' + h(l.item) : '') + '</td><td>' + h(l.ordered_qty) + '</td><td>' + (l.picked_qty !== '' && l.picked_qty != null ? h(l.picked_qty) : '') + '</td><td><input class="aeq" data-id="' + l.id + '" data-old="' + h(l.ordered_qty) + '" type="number" min="0" step="1" inputmode="numeric" value="' + h(l.ordered_qty) + '" style="width:80px;padding:6px"></td></tr>';
+  }).join('');
+  var sh = sheet('<h3>Order qty badlein (admin)</h3><p class="small muted">Stage: ' + h(stageLbl(o.stage)) + '. Har line ki nayi qty (poori pcs, 0 ya zyada) daalein. Purani aur nayi qty history mein save hogi. Value / invoice / billed qty nahi badlenge.</p><div class="tw"><table><tr><th>Brand / item</th><th>Abhi</th><th>Picked</th><th>Nayi qty</th></tr>' + rows + '<tr><th>Total</th><th>' + pcs(o.pcs) + '</th><th></th><th id="aeqt">' + pcs(o.pcs) + '</th></tr></table></div><button class="primary big" id="aeqs" style="margin-top:10px">Qty save karein</button>');
+  var ins = sh.querySelectorAll('.aeq');
+  function total() { var t = 0; Array.prototype.forEach.call(ins, function (i) { t += Number(i.value) || 0; }); $('aeqt').textContent = pcs(t); }
+  Array.prototype.forEach.call(ins, function (i) { i.oninput = total; });
+  $('aeqs').onclick = function () {
+    var ls = [], bad = '';
+    Array.prototype.forEach.call(ins, function (i) {
+      var v = String(i.value).trim(), n = Number(v);
+      if (v === '' || !isFinite(n) || n < 0 || Math.round(n) !== n) { bad = 'Qty poori pcs (0 ya zyada) mein daalein'; return; }
+      if (String(n) !== String(i.dataset.old)) ls.push({ line_id: Number(i.dataset.id), qty: n });
+    });
+    if (bad) return toast(bad, 'err');
+    if (!ls.length) return toast('Koi qty nahi badli', 'err');
+    var b = $('aeqs'); b.disabled = true;
+    call('editOrderQty', { id: o.id, lines: ls }).then(function (r) {
+      sh.remove(); toast('Qty update: ' + pcs(r.old_total) + ' → ' + pcs(r.total)); if (ondone) ondone();
+    }).catch(function (e) { b.disabled = false; if (/Unknown action editOrderQty/.test(String(e && e.message || e))) return toast('Backend Code_v38 paste + deploy karein (Manage deployments, pencil, New version)', 'err'); fail(e); });
+  };
+}
 function vOrder(v, id) {
   call('order', { id: id }).then(function (r) {
     var o = r.order, cyc = pendingCycleOf(o), manEdit = canNew() && /^W-/.test(o.src_id) && o.stage !== 'cancelled' && !o.invoice_no && S.m.stages.indexOf(o.stage) < S.m.stages.indexOf('billed'), nx = nextStep(o), mine = nx && STEP_ROLES[nx].indexOf(role()) >= 0 && !Number(o.hold), si = S.m.stages.indexOf(o.stage);
@@ -908,7 +942,8 @@ function vOrder(v, id) {
       return '<tr><td>' + h(l.brand) + (l.item ? ' ' + h(l.item) : '') + '</td><td>' + (isMgr() && o.stage !== 'dispatched' && !o.picked_at && !cyc ? '<input class="oq" data-id="' + l.id + '" type="number" min="0" value="' + h(l.ordered_qty) + '" style="width:80px;padding:6px">' : h(l.ordered_qty)) + '</td><td>' +
         pickCell + '</td><td class="short">' + (sh || '') + '</td>' + (cyc ? '<td>' + (plan > 0 ? pcs(plan) : '—') + '</td>' : '') + '</tr>';
     }).join('') + '<tr><th>Total</th><th>' + pcs(o.pcs) + '</th><th>' + (o.picked_at ? pcs(o.picked_qty) : '') + '</th><th></th>' + (cyc ? '<th>' + pcs(cyc.planned_qty || cyc.qty) + '</th>' : '') + '</tr></table></div>' + (isMgr() && !o.picked_at && !cyc ? '<button class="sm" id="saveq">Order qty save</button>' : '') +
-      (cyc ? '<p class="small muted" style="margin-top:6px">Leftover cycle: pehli pick qty (upar) same rehti hai. Is cycle mein sirf leftover column pick hota hai.</p>' : '');
+      (cyc ? '<p class="small muted" style="margin-top:6px">Leftover cycle: pehli pick qty (upar) same rehti hai. Is cycle mein sirf leftover column pick hota hai.</p>' : '') +
+      (canAdminQtyEdit(o, cyc) ? '<button class="sm" id="aqe" style="margin-top:8px">✏️ Edit qty (admin)</button>' : '') + qtyEditHistory(r.log);
     var act = '';
     if (mine) {
       if (nx === 'allocate') act = '<div class="grid2"><div>' + whoSel('w_picker', 'picker', o.picker_name, 'Pick kaun karega') + '</div><div>' + whoSel('w_checker', 'checker', o.checker_name, 'Check kaun karega') + '</div><div>' + whoSel('w_biller', 'biller', o.biller_name, 'Bill kaun karega') + '</div><div>' + whoSel('w_packer', 'packer', o.packer_name, 'Pack kaun karega') + '</div></div>';
@@ -954,6 +989,7 @@ function vOrder(v, id) {
     if ($('cnl')) $('cnl').onclick = function () { var why = prompt('Cancel ka reason?'); if (!why) return; call('cancelOrder', { id: o.id, reason: why }).then(function () { toast('Cancel ho gaya'); vOrder(v, id); }).catch(fail); };
     if ($('oas')) $('oas').onclick = function () { call('orderArea', { id: o.id, zone: val('oz'), area: val('oa'), route: val('or') }).then(function () { S.dl = null; toast('Saved'); vOrder(v, id); }).catch(fail); };
     if (isMgr() && !S.dl) loadDealers().then(function () { var e = $('dlbox'); if (e) e.outerHTML = dlists(); }).catch(function () {});
+    if ($('aqe')) $('aqe').onclick = function () { openQtyEdit(o, function () { vOrder(v, id); }); };
     if ($('saveq')) $('saveq').onclick = function () { var ls = []; Array.prototype.forEach.call(document.querySelectorAll('.oq'), function (i) { ls.push({ id: i.dataset.id, ordered_qty: i.value }); }); call('setLines', { id: o.id, lines: ls }).then(function () { toast('Saved'); vOrder(v, id); }).catch(fail); };
     if ($('hb')) $('hb').onclick = function () { call('hold', { id: o.id, reason: val('hr'), note: val('hn') }).then(function () { toast('Hold kiya'); vOrder(v, id); }).catch(fail); };
     if ($('rte')) $('rte').onclick = function () {

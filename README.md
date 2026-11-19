@@ -74,6 +74,13 @@ If leftover pending on that same order is sent back to picking (Pending executed
 
 Needs backend **Code_v36.gs** (admin / manager queue now returns billed; `billedOrders` takes `ready:1`). Deploy order does not matter: old frontend with new backend and new frontend with old backend both work, the packing queue only shows for admin / manager once v36 is pasted.
 
+## Admin order qty edit (v38)
+Admin only: on the order page, **Edit qty (admin)** under Items opens per-line qty inputs (whole pcs, 0 or more). Allowed at any stage before dispatch (new, punched, allocated, picked, checked, billed, packed). Blocked for dispatched, cancelled and merged orders, and while a leftover pending cycle is running. Saves via backend action `editOrderQty` (admin role checked on the server).
+
+What changes: line `ordered_qty`, order `ordered_qty` (sum of lines), `edited_at` / `edited_by`. After pick, `short_qty` is recomputed line-wise. If the order already has a leftover pending record, `pending_qty` / `pending_status` are recomputed from the new qty. Not changed: `ordered_value` (value is not derived from qty), `billed_qty`, invoice, picked qty. Every save writes a `qty_edit` row to the Log tab with old->new per line and the total; the order page shows this as **Qty / edit history**.
+
+Needs backend **Code_v38.gs**. Frontend sw **im-warehouse-v38**. Schema unchanged (21).
+
 ## Pack box types (v37)
 On Pack, the packer selects **Baby box** and/or **Carton** (one or both) and enters a count for each type. Total boxes is the sum and is still stored in `boxes`. The type breakdown is stored in `Orders.box_types` (JSON). The type and count show on the order card, Ready for despatch, Delivery / van plan, and in CSVs that include boxes. Orders packed before this change keep showing only the count.
 
