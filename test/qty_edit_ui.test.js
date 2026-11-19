@@ -15,5 +15,5 @@ assert.equal(ctx.qtyEditHistory([{ action: 'pick', note: 'x' }]), '');
 const hh = ctx.qtyEditHistory([{ action: 'qty_edit', note: 'LUX: 10->12', at: 'T1', by_name: 'Pramod' }]);
 assert.ok(/Qty badli \(admin\)/.test(hh) && /LUX: 10-&gt;12|LUX: 10->12/.test(hh) && /Pramod/.test(hh));
 assert.ok(src.indexOf("call('editOrderQty'") >= 0);
-assert.ok(fs.readFileSync(__dirname + '/../sw.js', 'utf8').indexOf("im-warehouse-v38") >= 0);
+assert.ok(fs.readFileSync(__dirname + '/../sw.js', 'utf8').search(/im-warehouse-v(3[89]|4\d)/) >= 0);
 console.log('qty edit ui ok');

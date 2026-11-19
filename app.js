@@ -482,7 +482,7 @@ function vQueue(v) {
     if (qs === 'billed') { qs = 'ready'; LS.setItem('imw_qs', qs); }
     var opts = [['', 'Sab dates'], ['today', 'Aaj'], ['yday', 'Kal'], ['week', 'Is hafte'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
     var billedOpts = [['last7', 'Last 7 days'], ['today', 'Aaj'], ['yday', 'Kal'], ['month', 'Is mahine'], ['date', 'Ek date'], ['range', 'From - To']];
-    var stageOpts = [['', 'Sab'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['packing', 'Packing'], ['ready', 'Ready for despatch'], ['hold', 'HOLD'], ['dup', '⚠ Duplicates'], ['pending_bill', 'Pending for billing'], ['pending_left', 'Pending leftover']];
+    var stageOpts = [['', 'Sab'], ['punching', 'Punching'], ['picking', 'Picking'], ['checking', 'Checking'], ['billing', 'Billing'], ['packing', 'Packing'], ['ready', 'Ready for despatch'], ['hold', 'HOLD'], ['dup', '⚠ Duplicates'], ['pending_bill', 'Pending for billing'], ['pending_left', 'Pending leftover']];
 
     v.innerHTML = '<div class="row"><h2>Meri queue (<span id="qn">' + list.length + '</span>)</h2>' + syncBtn() + '</div><p class="small muted">Last sync: ' + tm(S.m.last_sync) + '</p>' +
       '<div class="row"><select id="qf"></select>' +
@@ -494,6 +494,7 @@ function vQueue(v) {
       if (!st) return true;
       if (st === 'hold') return !!Number(o.hold);
       if (st === 'pending_bill') return o.stage !== 'cancelled' && o.stage !== 'dispatched' && ['new', 'punched', 'allocated', 'picked', 'checked'].indexOf(o.stage) >= 0;
+      if (st === 'punching') return o.stage === 'new' && !!Number(o.needs_punch);
       if (st === 'picking') return o.stage === 'allocated';
       if (st === 'checking') return o.stage === 'picked';
       if (st === 'billing') return o.stage === 'checked';
