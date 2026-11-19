@@ -18,7 +18,7 @@ Backend: Google Apps Script Web app (Code.gs kept outside this repo, see SETUP.m
 
 ## Flow
 1. Sales Tracker orders (Calls with order Trylo / C9) sync every 15 min, or "Sync now".
-2. Manager allocates to picker. Picker enters picked qty (short qty shown). Checker checks. Biller enters invoice no, qty, value (or imports the Fusion ERP CSV/XLSX). Packer enters boxes. Dispatch sets mode, vehicle, payment mode, then dispatches.
+2. Manager allocates to picker. Picker enters picked qty (short qty shown). Checker checks. Biller enters invoice no, qty, value (or imports the Fusion ERP CSV/XLSX). Packer chooses Baby box and/or Carton and enters the count for each (total boxes = sum). Dispatch sets mode, vehicle, payment mode, then dispatches.
 3. Hold / unhold with reason at any stage before dispatch. Held orders show in Dashboard > Pending to bill with age.
 4. Order screen lists nearby pending orders (same area / route / within 3 km). Cluster tab groups pending orders by area.
 
@@ -74,6 +74,10 @@ If leftover pending on that same order is sent back to picking (Pending executed
 
 Needs backend **Code_v36.gs** (admin / manager queue now returns billed; `billedOrders` takes `ready:1`). Deploy order does not matter: old frontend with new backend and new frontend with old backend both work, the packing queue only shows for admin / manager once v36 is pasted.
 
+## Pack box types (v37)
+On Pack, the packer selects **Baby box** and/or **Carton** (one or both) and enters a count for each type. Total boxes is the sum and is still stored in `boxes`. The type breakdown is stored in `Orders.box_types` (JSON). The type and count show on the order card, Ready for despatch, Delivery / van plan, and in CSVs that include boxes. Orders packed before this change keep showing only the count.
+
+
 ## Store orders (Karwa Marketing)
 A store order is identified only by **source = `Karwa Marketing Store`**. Warehouse creates it on the Store orders tab (`#/sq`), choosing one of the 9 Intimissi / Karwa Marketing stores, and attaches the Order photo. The Pending page photo is required when the store order is billed. Old execution-page photos still display if present. Sales Tracker imports stay `source = Sales Tracker` and are **not** treated as store orders, even if the dealer name looks like a store.
 
@@ -96,4 +100,4 @@ Admin and warehouse manager: bottom nav **Fulfilment** (`#/ful`). Customer-level
 
 Fulfilled = billed qty: the first bill (line picked qty when picked line-wise, else order billed qty shared over lines by ordered qty) plus billed leftover cycles (PendingExec), capped per line at ordered. Sales = Billing import invoice values (each invoice once), else the order's bill value. Sales Tracker lines carry brand only, so the article tab shows brand rows unless an item is filled in.
 
-Frontend sw **im-warehouse-v37**. Backend `Code_v37.gs` (paste + new version), read-only `fulfilment` action. Schema still **20**.
+Frontend sw **im-warehouse-v37**. Backend `Code_v37.gs` (paste + new version), read-only `fulfilment` action, and pack box types (Baby box / Carton). Schema **21**: new `Orders.box_types` column only (header appended; no row changes). `boxes` stays the total. Old packed orders without a type still show just the count.

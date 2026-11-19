@@ -11,6 +11,76 @@ function tm(iso) { if (!iso) return '-'; var t = new Date(new Date(iso).getTime(
 function mins(m) { if (m == null || m === '') return '-'; m = Math.round(m); return m >= 60 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : m + 'm'; }
 function inr(n) { return 'Rs ' + Math.round(Number(n) || 0).toLocaleString('en-IN'); }
 function pcs(n) { return (n === '' || n == null ? '-' : Math.round(Number(n) || 0).toLocaleString('en-IN')) + ' pcs'; }
+var BOX_TYPES = [['baby_box', 'Baby box'], ['carton', 'Carton']];
+function parseBoxTypes(o) {
+  var t = { baby_box: 0, carton: 0 };
+  if (!o) return t;
+  var raw = o.box_types, parsed = null;
+  if (raw && typeof raw === 'object') parsed = raw;
+  else if (raw) { try { parsed = JSON.parse(raw); } catch (e) { parsed = null; } }
+  if (parsed) {
+    var b = Number(parsed.baby_box), c = Number(parsed.carton);
+    if (b > 0 && b === Math.floor(b)) t.baby_box = b;
+    if (c > 0 && c === Math.floor(c)) t.carton = c;
+  }
+  if (o.baby_boxes != null && o.baby_boxes !== '') { var bb = Number(o.baby_boxes); if (bb > 0 && bb === Math.floor(bb)) t.baby_box = bb; }
+  if (o.carton_boxes != null && o.carton_boxes !== '') { var cc = Number(o.carton_boxes); if (cc > 0 && cc === Math.floor(cc)) t.carton = cc; }
+  return t;
+}
+function formatBoxes(o) {
+  if (!o) return '';
+  var t = parseBoxTypes(o), parts = [];
+  if (t.baby_box > 0) parts.push(t.baby_box + (t.baby_box === 1 ? ' baby box' : ' baby boxes'));
+  if (t.carton > 0) parts.push(t.carton + (t.carton === 1 ? ' carton' : ' cartons'));
+  if (parts.length) return parts.join(' + ');
+  var n = Number(o.boxes);
+  return n > 0 ? n + (n === 1 ? ' box' : ' boxes') : '';
+}
+function packBoxFormHtml() {
+  return '<label>Box type</label><div class="seg" id="bxtypes">' +
+    BOX_TYPES.map(function (x) { return '<button type="button" class="sm" data-bt="' + x[0] + '" id="bt_' + x[0] + '">' + x[1] + '</button>'; }).join('') +
+    '</div><div class="grid2" id="bxcounts">' +
+    BOX_TYPES.map(function (x) { return '<div id="bxrow_' + x[0] + '" class="hidden"><label>' + x[1] + ' kitne</label><input id="bx_' + x[0] + '" type="number" min="1" value="1"></div>'; }).join('') +
+    '</div><p class="small muted" id="bxtotal">Total: 0 boxes</p>';
+}
+function packBoxSum() {
+  var tot = 0;
+  BOX_TYPES.forEach(function (x) {
+    var btn = $('bt_' + x[0]), row = $('bxrow_' + x[0]);
+    var on = btn && btn.classList.contains('on');
+    if (row) row.classList.toggle('hidden', !on);
+    if (on) tot += Math.max(0, Math.floor(Number(val('bx_' + x[0])) || 0));
+  });
+  var el = $('bxtotal'); if (el) el.textContent = 'Total: ' + tot + ' box' + (tot === 1 ? '' : 'es');
+  return tot;
+}
+function bindPackBoxInputs() {
+  BOX_TYPES.forEach(function (x) {
+    var b = $('bt_' + x[0]), inp = $('bx_' + x[0]);
+    if (b) b.onclick = function () { b.classList.toggle('on'); if (b.classList.contains('on') && inp && !inp.value) inp.value = '1'; packBoxSum(); };
+    if (inp) inp.oninput = packBoxSum;
+  });
+  packBoxSum();
+}
+function packBoxPayload() {
+  var t = { baby_box: 0, carton: 0 }, any = false;
+  BOX_TYPES.forEach(function (x) {
+    var b = $('bt_' + x[0]);
+    if (!(b && b.classList.contains('on'))) return;
+    any = true;
+    var n = Number(val('bx_' + x[0]));
+    if (!(n > 0) || n !== Math.floor(n)) { t.error = x[1] + ' ki ginti poori sankhya mein daalein'; return; }
+    t[x[0]] = n;
+  });
+  if (t.error) return t;
+  if (!any) return { error: 'Baby box ya carton chunein' };
+  var tot = t.baby_box + t.carton;
+  if (!(tot > 0)) return { error: 'Baby box ya carton ki ginti daalein' };
+  t.boxes = tot;
+  t.box_types = JSON.stringify({ baby_box: t.baby_box, carton: t.carton });
+  return t;
+}
+
 function dmy(d) { return d ? String(d).split('-').reverse().join('-') : ''; }
 function val(id) { var e = $(id); return e ? e.value.trim() : ''; }
 var pending = 0; function busy(d) { pending += d; $('loading').classList.toggle('hidden', pending <= 0); }
@@ -298,7 +368,7 @@ function cardInner(o) {
   return '<div class="row"><b><a href="#/o/' + o.id + '" style="color:inherit;text-decoration:none">' + trk(o) + h(ono(o)) + '</a> ' + dealerLinkHtml(o) + '</b><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div>' +
     '<div class="small">' + slaBadge(o) + '</div><div class="small muted">' + h(dmy(o.order_date)) + ' • ' + (o.zone ? '<b>' + h(o.zone) + '</b> / ' : '') + h(o.area || 'area ?') + (o.route ? ' • ' + h(o.route) : '') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.salesman ? ' • ' + h(o.salesman) : '') + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.expected_date ? ' • exp ' + h(dmy(o.expected_date)) : '') + (o.plan_delivery_date ? ' • plan ' + h(dmy(o.plan_delivery_date)) + (o.plan_van ? ' ' + h(o.plan_van) : '') : '') + '</div>' +
     '<div class="small">' + (o.lines || []).map(function (l) { return h(l.brand) + ' ' + pcs(l.ordered_qty); }).join(' + ') + ((o.lines || []).length > 1 ? ' = <b>' + pcs(o.pcs) + '</b>' : '') +
-    [['Punch', o.punch_name], ['P', o.picker_name], ['C', o.checker_name], ['B', o.biller_name], ['Pk', o.packer_name]].filter(function (x) { return x[1]; }).map(function (x) { return ' • ' + x[0] + ': ' + h(x[1]); }).join('') + (o.invoice_no ? ' • Inv ' + h(o.invoice_no) : '') + (o.vehicle || o.delivery_mode ? ' • ' + h(o.vehicle || o.delivery_mode) : '') + '</div>' +
+    [['Punch', o.punch_name], ['P', o.picker_name], ['C', o.checker_name], ['B', o.biller_name], ['Pk', o.packer_name]].filter(function (x) { return x[1]; }).map(function (x) { return ' • ' + x[0] + ': ' + h(x[1]); }).join('') + (o.invoice_no ? ' • Inv ' + h(o.invoice_no) : '') + (o.vehicle || o.delivery_mode ? ' • ' + h(o.vehicle || o.delivery_mode) : '') + (formatBoxes(o) ? ' • ' + h(formatBoxes(o)) : '') + '</div>' +
     (Number(o.hold) ? '<div class="small short">Hold: ' + h(o.hold_reason) + ' ' + h(o.hold_note) + '</div>' : '') + (o.stage === 'cancelled' ? '<div class="small short">Cancel: ' + h(o.cancel_reason) + '</div>' : '') + pendingWarnHtml(o);
 }
 function card(o, sel) {
@@ -477,7 +547,7 @@ function vQueue(v) {
       $('qsum').innerHTML = bits.join(' · ') + ': ' + msg + (lo.length ? ' <button type="button" class="sm" id="bex">CSV</button>' : '');
       $('qlst').innerHTML = lo.length ? lo.map(card).join('') : '<div class="card center muted">' + (billed.needDeploy ? 'Ready for despatch tab server update ke baad khulega.' : 'Is filter mein koi ready order nahi.') + '</div>';
       if ($('bex')) $('bex').onclick = function () {
-        csv(lo.map(function (o) { return { billed_at: o.billed_at, bill_date: o.billed_at, invoice_no: o.invoice_no, tracking_no: o.track_no, order: o.order_no || o.id, dealer: o.dealer_name, stage: o.stage, pcs: o.pcs, billed_value: o.billed_value }; }), 'ready-for-despatch');
+        csv(lo.map(function (o) { var t = parseBoxTypes(o); return { billed_at: o.billed_at, bill_date: o.billed_at, invoice_no: o.invoice_no, tracking_no: o.track_no, order: o.order_no || o.id, dealer: o.dealer_name, stage: o.stage, pcs: o.pcs, billed_value: o.billed_value, boxes: o.boxes || '', baby_boxes: t.baby_box || '', carton_boxes: t.carton || '', box_detail: formatBoxes(o) }; }), 'ready-for-despatch');
       };
     }
     function draw() {
@@ -824,7 +894,7 @@ function vOrder(v, id) {
       var nm = { punch: o.punch_name, pick: o.picker_name, check: o.checker_name, bill: o.biller_name, pack: o.packer_name, dispatch: o.dispatch_name }[s[0]];
       if (s[0] === 'pick' && done) extra = ' • picked ' + h(o.picked_qty) + (Number(o.short_qty) ? ' <span class="short">short ' + o.short_qty + '</span>' : '');
       if (s[0] === 'bill' && o.invoice_no) extra = ' • Inv ' + h(o.invoice_no) + ' • ' + pcs(o.billed_qty) + (o.bill_source ? ' (' + h(o.bill_source) + ')' : '');
-      if (s[0] === 'pack' && done) extra = ' • ' + h(o.boxes) + ' boxes';
+      if (s[0] === 'pack' && done) extra = formatBoxes(o) ? ' • ' + h(formatBoxes(o)) : '';
       if (s[0] === 'dispatch' && o.delivery_mode) extra = ' • ' + h(o.delivery_mode) + ' ' + h(o.vehicle) + ' • ' + h(o.payment_mode) + ' • ' + h(dmy(o.dispatch_date));
       return '<li class="' + (done ? 'done' : (i === si ? 'now' : '')) + '"><b>' + s[3] + '</b>' + extra + '<div class="small muted">' + (done ? tm(o[s[1]]) + ' • ' + (nm && s[0] !== 'allocate' ? 'Done by <b>' + h(nm) + '</b> (login: ' + h(o[s[2]]) + ')' : h(o[s[2]])) : 'Pending' + (nm && s[0] !== 'allocate' ? ' • assigned ' + h(nm) : '')) + '</div></li>';
     }).join('') + '</ul>';
@@ -844,7 +914,7 @@ function vOrder(v, id) {
       if (nx === 'allocate') act = '<div class="grid2"><div>' + whoSel('w_picker', 'picker', o.picker_name, 'Pick kaun karega') + '</div><div>' + whoSel('w_checker', 'checker', o.checker_name, 'Check kaun karega') + '</div><div>' + whoSel('w_biller', 'biller', o.biller_name, 'Bill kaun karega') + '</div><div>' + whoSel('w_packer', 'packer', o.packer_name, 'Pack kaun karega') + '</div></div>';
       else act = whoSel('w_done', STEP_ROLE[nx][0], o[STEP_ROLE[nx][1]] || (role() === STEP_ROLE[nx][0] ? S.user.name : ''), 'Kisne kiya (naam)');
       if (nx === 'bill') act += '<div class="grid2"><div><label>Invoice no' + (cyc ? ' (is leftover cycle ka)' : '') + '</label><input id="inv"></div><div><label>Billed qty (pcs)</label><input id="bq" type="number" value="' + h(cyc ? (cyc.qty || cyc.planned_qty) : o.picked_qty) + '"></div></div>' + (cyc && o.invoice_no ? '<p class="small muted">Pehla invoice ' + h(o.invoice_no) + ' nahi badlega. Yeh naya bill is cycle par lagega.</p>' : '') + (isStore(o) ? '<div class="card" style="margin:6px 0"><label><b>Pending page</b>' + (o.photo_pending_id ? ' <span class="small" style="color:#1e7e34">(lagi hui hai, nayi chunein to badal jayegi)</span>' : ' *') + '</label><input type="file" accept="image/*" capture="environment" data-ph="pending"><div class="small muted" id="phs_pending"></div><img id="phv_pending" style="max-width:160px;max-height:160px;display:none;margin-top:6px;border:1px solid var(--line)"></div>' : '');
-      if (nx === 'pack') act += '<label>Kitne boxes</label><input id="bx" type="number" min="1">';
+      if (nx === 'pack') act += packBoxFormHtml();
       act += '<button class="good big" id="stepb" style="margin-top:10px">✔ ' + STEPS.filter(function (s) { return s[0] === nx; })[0][3] + ' confirm</button>';
     }
     var hold = '';
@@ -859,6 +929,7 @@ function vOrder(v, id) {
       (manEdit ? '<div class="row" style="margin-top:8px"><a class="btn sm" href="#/' + (isStore(o) ? 'sq/' : '') + 'edit/' + o.id + '">✏️ Edit</a><button class="sm danger" id="cnl">Cancel order</button></div>' : '') + '</div>' +
       (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + dupCard(o, r.dup_orders) + (o.merged_into ? '<div class="card short">Ye order duplicate tha, <a href="#/o/' + h(o.merged_into) + '">' + h((o.merged_into_order && (o.merged_into_order.track_no || o.merged_into_order.order_no)) || '#' + o.merged_into) + '</a> mein merge hua (' + tm(o.merged_at) + ', ' + h(o.merged_by) + ')</div>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + (cyc ? '<p class="small short">Leftover cycle chal raha hai — ab ' + h(stageLbl(o.stage)) + (cyc.picker_name ? ', picker ' + h(cyc.picker_name) : '') + '. Pehli pick / bill history same rehti hai.</p>' : '') + tl + act + '</div>' + pendingExecCard(o) + waitCard(o) + planCard(o) + hold + del + nb;
     var billPhotos = {};
+    if (mine && nx === 'pack') bindPackBoxInputs();
     if (mine && nx === 'bill' && isStore(o)) bindPhotoInputs(billPhotos);
     var b = $('stepb'); if (b) b.onclick = function () {
       var d = { id: o.id, action: nx };
@@ -868,7 +939,11 @@ function vOrder(v, id) {
       } else { d.done_by = whoVal('w_done'); if (!d.done_by) return toast('Naam chunein (kisne kiya)', 'err'); }
       if (nx === 'pick') { d.picked = {}; Array.prototype.forEach.call(document.querySelectorAll('.pq'), function (i) { d.picked[i.dataset.id] = i.value; }); }
       if (nx === 'bill') { d.invoice_no = val('inv'); d.billed_qty = val('bq'); }
-      if (nx === 'pack') d.boxes = val('bx');
+      if (nx === 'pack') {
+        var bx = packBoxPayload();
+        if (bx.error) return toast(bx.error, 'err');
+        d.boxes = bx.boxes; d.baby_boxes = bx.baby_box; d.carton_boxes = bx.carton; d.box_types = bx.box_types;
+      }
       function goStep() { return call('step', d).then(function () { toast('Ho gaya ✔'); vOrder(v, id); }).catch(function (e) { if (b) b.disabled = false; fail(e); }); }
       if (nx === 'bill' && isStore(o)) {
         if (!billPhotos.pending && !o.photo_pending_id) return toast('Pending page ki photo lagayein', 'err');
@@ -914,7 +989,7 @@ function planCard(o) {
   var canEdit = can('routes') && o.stage !== 'dispatched';
   return '<div class="card"><h3>Van / delivery plan</h3>' +
     '<div class="small">Plan date: <b>' + h(dmy(o.plan_delivery_date) || '-') + '</b> • Van: <b>' + h(o.plan_van || '-') + '</b> • Mode: ' + h(o.plan_mode || '-') +
-    (o.plan_option ? ' • Option ' + h(o.plan_option) : '') + (Number(o.plan_realtime) ? ' • <span class="pill">Real-time</span>' : '') + planBadge(o) + '</div>' +
+    (o.plan_option ? ' • Option ' + h(o.plan_option) : '') + (Number(o.plan_realtime) ? ' • <span class="pill">Real-time</span>' : '') + (formatBoxes(o) ? ' • ' + h(formatBoxes(o)) : '') + planBadge(o) + '</div>' +
     '<div class="small muted">Area match: ' + h(o.plan_area || o.area || '-') + (o.plan_at ? ' • set ' + tm(o.plan_at) + ' ' + h(o.plan_by) : '') + '</div>' +
     (canEdit ? '<details style="margin-top:8px"><summary><b>Override / clear</b></summary><div class="grid2"><div><label>Delivery date</label><input type="date" id="pdd" value="' + h(o.plan_delivery_date || '') + '"></div><div><label>Van</label><select id="pdv"><option value="">-</option>' + vans.map(function (x) { return '<option' + (o.plan_van === x ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select></div><div><label>Mode</label><select id="pdm"><option value="van"' + (o.plan_mode === 'van' ? ' selected' : '') + '>van</option><option value="hand"' + (o.plan_mode === 'hand' ? ' selected' : '') + '>hand</option><option value="courier"' + (o.plan_mode === 'courier' ? ' selected' : '') + '>courier</option></select></div></div><div class="row" style="margin-top:8px"><button class="primary" id="pov">Save override</button><button class="warn" id="pcl">Clear override (auto recompute)</button></div></details>' : '') + '</div>';
 }
@@ -951,7 +1026,7 @@ function vDisp(v) {
     var un = open.filter(function (o) { return !o.delivery_mode; }), al = open.filter(function (o) { return o.delivery_mode; });
     var groups = {}; un.forEach(function (o) { var k = (o.area || 'No area') + (o.route ? ' • ' + o.route : ''); (groups[k] = groups[k] || []).push(o); });
     v.innerHTML = '<div class="row"><h2>Delivery allocation</h2><a class="btn sm" href="#/kal">🚐 Kal delivery</a></div><div class="card"><h3>Bill ho chuke, delivery baaki (' + un.length + ')</h3>' + Object.keys(groups).sort().map(function (k) {
-      return '<div class="small muted" style="margin-top:8px"><b>' + h(k) + '</b> (' + groups[k].length + ')</div>' + groups[k].map(function (o) { return '<label class="chk"><input type="checkbox" class="sel" value="' + o.id + '"><span><b>' + h(o.track_no || '#' + o.id) + '</b> ' + h(o.dealer_name) + ' • ' + h(o.invoice_no) + ' • ' + pcs(o.billed_qty || o.pcs) + ' • ' + h(stageLbl(o.stage)) + (o.boxes ? ' • ' + o.boxes + ' boxes' : '') + '</span></label>'; }).join('');
+      return '<div class="small muted" style="margin-top:8px"><b>' + h(k) + '</b> (' + groups[k].length + ')</div>' + groups[k].map(function (o) { return '<label class="chk"><input type="checkbox" class="sel" value="' + o.id + '"><span><b>' + h(o.track_no || '#' + o.id) + '</b> ' + h(o.dealer_name) + ' • ' + h(o.invoice_no) + ' • ' + pcs(o.billed_qty || o.pcs) + ' • ' + h(stageLbl(o.stage)) + (formatBoxes(o) ? ' • ' + h(formatBoxes(o)) : '') + '</span></label>'; }).join('');
     }).join('') + (un.length ? delForm() + '<button class="primary big" id="go" style="margin-top:10px">Selected ko allocate karein</button>' : '<p class="muted">Sab allocate ho gaye.</p>') + '</div>' +
       '<div class="card"><h3>Allocated, dispatch baaki (' + al.length + ')</h3>' + al.map(card).join('') + '</div>';
     if ($('go')) $('go').onclick = function () { var ids = Array.prototype.map.call(document.querySelectorAll('.sel:checked'), function (i) { return Number(i.value); }); if (!ids.length) return toast('Orders chunein', 'err'); call('delivery', delData(ids)).then(function () { toast(ids.length + ' allocated'); vDisp(v); }).catch(fail); };
@@ -1218,7 +1293,7 @@ function vStoreQueue(v) {
       $('sqsum').innerHTML = bits.join(' · ') + ': ' + msg + (lo.length ? ' <button type="button" class="sm" id="sbex">CSV</button>' : '');
       $('sqlst').innerHTML = lo.length ? lo.map(scard).join('') : '<div class="card center muted">' + (billed.needDeploy ? 'Ready for despatch tab server update ke baad khulega.' : 'Is filter mein koi ready store order nahi.') + '</div>';
       if ($('sbex')) $('sbex').onclick = function () {
-        csv(lo.map(function (o) { return { billed_at: o.billed_at, invoice_no: o.invoice_no, tracking_no: o.track_no, order: o.order_no || o.id, store: storeOf(o), dealer: o.dealer_name, stage: o.stage, pcs: o.pcs, billed_value: o.billed_value }; }), 'store-ready-for-despatch');
+        csv(lo.map(function (o) { var t = parseBoxTypes(o); return { billed_at: o.billed_at, invoice_no: o.invoice_no, tracking_no: o.track_no, order: o.order_no || o.id, store: storeOf(o), dealer: o.dealer_name, stage: o.stage, pcs: o.pcs, billed_value: o.billed_value, boxes: o.boxes || '', baby_boxes: t.baby_box || '', carton_boxes: t.carton || '', box_detail: formatBoxes(o) }; }), 'store-ready-for-despatch');
       };
     }
     function draw() {
@@ -1689,7 +1764,7 @@ function vDash(v) {
       '<div class="card" style="margin-top:12px"><h3>Source wise (last 30 din)</h3><div class="grid4">' + Object.keys(d.sources || {}).map(function (k) { return '<div class="kpi"><b>' + d.sources[k] + '</b><span>' + h(k) + '</span></div>'; }).join('') + '</div></div>' +
       '<div class="card" style="margin-top:12px"><div class="row"><h3>Pending to bill (' + d.pending.length + ')</h3><button class="sm" id="e1">CSV</button></div>' + table(d.pending, [['id', 'Tracking no', function (x, r) { return '<a href="#/o/' + x + '"><b>' + h(r.track_no || '-') + '</b></a>'; }], ['order_no', 'Order'], ['source', 'Source', function (x, r) { return h(x) + (r.priority === 'Urgent' ? ' <span class="short">URGENT</span>' : ''); }], ['dealer_name', 'Dealer'], ['zone', 'Zone'], ['area', 'Area'], ['reason', 'Reason', function (x, r) { return r.hold ? '<span class="short">' + h(x) + '</span>' : h(x); }], ['age_days', 'Age (din)'], ['pcs', 'Pcs', pcs]]) + '</div>' +
       (function (pl) { pl = d.pending_left || { count: 0, remaining: 0, orders: [] }; return '<div class="card" style="margin-top:12px"><div class="row"><h3>Pending leftover — purane order (' + (pl.count || 0) + ')</h3><button class="sm" id="e5">CSV</button></div><p class="small muted">Pehli fulfillment ke baad baaki qty isi purane order par pick/bill hoti hai (dispatched included). Combined baaki <b>' + pcs(pl.remaining) + '</b>. <a href="#/q">Meri queue → Pending leftover</a></p>' + (pl.orders && pl.orders.length ? table(pl.orders, [['id', 'Tracking no', function (x, r) { return '<a href="#/o/' + x + '"><b>' + h(r.track_no || ono(r)) + '</b></a>'; }], ['dealer_name', 'Dealer', function (x, r) { return '<a href="' + dealerHref(r) + '">' + h(x) + '</a>'; }], ['order_date', 'Order date', dmy], ['stage', 'Stage', stageLbl], ['pending_qty', 'Baaki pcs', pcs]]) : '<p class="muted small">Koi leftover pending nahi.</p>') + '</div>'; })() +
-      '<div class="card"><div class="row"><h3>Aaj ka dispatch by vehicle</h3><button class="sm" id="e2">CSV</button></div>' + table(d.dispatch, [['vehicle', 'Vehicle / mode'], ['orders', 'Orders'], ['dispatched', 'Dispatched'], ['boxes', 'Boxes'], ['pcs', 'Pcs', pcs], ['dealers', 'Dealers', function (x) { return h(x.join(', ')); }]]) + '</div>' +
+      '<div class="card"><div class="row"><h3>Aaj ka dispatch by vehicle</h3><button class="sm" id="e2">CSV</button></div>' + table(d.dispatch, [['vehicle', 'Vehicle / mode'], ['orders', 'Orders'], ['dispatched', 'Dispatched'], ['boxes', 'Boxes'], ['baby_boxes', 'Baby box'], ['carton_boxes', 'Carton'], ['pcs', 'Pcs', pcs], ['dealers', 'Dealers', function (x) { return h(x.join(', ')); }]]) + '</div>' +
       '<div class="card"><div class="row"><h3>Efficiency (last 30 din, avg time per step)</h3><button class="sm" id="e3">CSV</button></div>' + table(d.efficiency, [['step', 'Step'], ['person', 'Kisne'], ['orders', 'Orders'], ['avg_min', 'Avg', mins], ['max_min', 'Max', mins]]) + '</div>';
     $('day').onchange = function () { LS.setItem('imw_day', this.value); vDash(v); };
     $('e1').onclick = function () { csv(d.pending, 'pending-to-bill'); }; $('e2').onclick = function () { csv(d.dispatch.map(function (r) { return Object.assign({}, r, { dealers: r.dealers.join(' | ') }); }), 'dispatch-' + day); }; $('e3').onclick = function () { csv(d.efficiency, 'efficiency'); };
