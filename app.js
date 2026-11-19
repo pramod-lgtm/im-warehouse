@@ -82,7 +82,7 @@ function sheet(html) { var d = document.createElement('div'); d.className = 'she
 
 // ---------------- router
 function go(p) { if (location.hash !== '#' + p) location.hash = '#' + p; else route(); }
-var NAV = [['/q', '📋', 'Meri queue', null], ['/sq', '🛍️', 'Store orders', null], ['/all', '🏬', 'Sab orders', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/perf', '📈', 'Performance', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
+var NAV = [['/q', '📋', 'Meri queue', null], ['/sq', '🛍️', 'Store orders', null], ['/all', '🏬', 'Sab orders', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/perf', '📈', 'Performance', 'view'], ['/ful', '📦', 'Fulfilment', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
 function nav(cur) {
   var n = $('nav'); if (!S.user) { n.classList.add('hidden'); return; }
   n.innerHTML = NAV.filter(function (x) { return !x[3] || can(x[3]); }).map(function (x) { return '<a href="#' + x[0] + '" class="' + (cur.indexOf(x[0]) === 0 ? 'on' : '') + '"><i>' + x[1] + '</i>' + x[2] + '</a>'; }).join('');
@@ -97,7 +97,7 @@ function route() {
   var raw = location.hash.slice(1) || '/q', p = raw.split('?')[0], v = $('view');
   if (p !== '/setup' && !S.token) p = '/login';
   $('who').textContent = S.user ? S.user.name + ' (' + S.user.role_label + ')' : '';
-  nav(p === '/login' || p === '/setup' ? p : raw.split('?')[0]); document.body.classList.toggle('hub-page', p === '/perf'); window.scrollTo(0, 0);
+  nav(p === '/login' || p === '/setup' ? p : raw.split('?')[0]); document.body.classList.toggle('hub-page', p === '/perf' || p === '/ful'); window.scrollTo(0, 0);
   if (p === '/login') return vLogin(v); if (p === '/setup') return vSetup(v);
   masters().then(function () {
     if (p.indexOf('/o/') === 0) return vOrder(v, Number(p.slice(3)));
@@ -106,7 +106,7 @@ function route() {
     if (p.indexOf('/sq/edit/') === 0) return call('order', { id: Number(p.slice(9)) }).then(function (r) { vStoreNew(v, r.order); }).catch(fail);
     if (p === '/sq') return vStoreQueue(v);
     if (p.indexOf('/edit/') === 0) return call('order', { id: Number(p.slice(6)) }).then(function (r) { if (isStore(r.order)) return go('/sq/edit/' + r.order.id); vNew(v, r.order); }).catch(fail);
-    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/kal': vKalDelivery, '/van': vVanPlan, '/dash': vDash, '/perf': vPerf, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList, '/dup': vDups }[p] || vQueue; f(v);
+    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/kal': vKalDelivery, '/van': vVanPlan, '/dash': vDash, '/perf': vPerf, '/ful': vFul, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList, '/dup': vDups }[p] || vQueue; f(v);
   }).catch(fail);
 }
 window.addEventListener('hashchange', route);
@@ -1477,6 +1477,172 @@ function renderPerf(v, d, f) {
     csv(rows, 'warehouse-performance');
   };
 }
+
+// ---------------- order vs fulfilment (v37): customer level, pcs first, value where the sheet has it
+var FUL = { key: '', data: null, at: 0, tab: 'sum', q: '', sort: {}, cust: '' };
+function fulMode() {
+  var q = hashQuery();
+  return { mode: q.mode === 'range' || q.mode === 'day' ? q.mode : 'mtd', from: q.from || '', to: q.to || '', date: q.date || today(), brand: q.brand || '', kind: q.kind === 'store' || q.kind === 'dealer' ? q.kind : 'all' };
+}
+function fulGo(patch) {
+  var c = Object.assign(fulMode(), patch || {}), q = ['mode=' + encodeURIComponent(c.mode)];
+  if (c.mode === 'range') { q.push('from=' + encodeURIComponent(c.from || today().slice(0, 7) + '-01')); q.push('to=' + encodeURIComponent(c.to || today())); }
+  if (c.mode === 'day') q.push('date=' + encodeURIComponent(c.date || today()));
+  if (c.brand) q.push('brand=' + encodeURIComponent(c.brand));
+  if (c.kind !== 'all') q.push('kind=' + encodeURIComponent(c.kind));
+  go('/ful?' + q.join('&'));
+}
+function fulNum(n) { return n === '' || n == null ? '-' : Math.round(Number(n) || 0).toLocaleString('en-IN'); }
+function fulRs(n) { return n ? '₹' + Math.round(Number(n)).toLocaleString('en-IN') : '-'; }
+function fulDays(n) { return n === '' || n == null ? '-' : n + ' din'; }
+function fulPctCell(p) { return p === '' || p == null ? '-' : '<span class="hub-badge ' + hubPctClass(p) + '">' + p + '%</span>' + hubBar(p); }
+var FUL_ST = { full: ['Fully', 'hub-ok'], partial: ['Partly', 'hub-warn'], none: ['Not billed', 'hub-bad'] };
+function fulStatus(o) { var s = FUL_ST[o.status] || ['-', '']; return '<span class="hub-badge ' + s[1] + '">' + (o.status === 'none' && o.open ? 'In process' : s[0]) + '</span>'; }
+/** Filter rows by search text over the given keys, then sort by FUL.sort[tab]. Pure, used by tests. */
+function fulRows(rows, keys, q, sort) {
+  q = String(q || '').trim().toLowerCase();
+  var out = (rows || []).filter(function (r) { return !q || keys.some(function (k) { return String(r[k] == null ? '' : r[k]).toLowerCase().indexOf(q) >= 0; }); });
+  if (sort && sort.k) {
+    var k = sort.k, d = sort.d === 'asc' ? 1 : -1;
+    out = out.slice().sort(function (a, b) {
+      var x = a[k], y = b[k], ex = x === '' || x == null, ey = y === '' || y == null;
+      if (ex || ey) return ex === ey ? 0 : ex ? 1 : -1;
+      if (typeof x === 'number' && typeof y === 'number') return (x - y) * d;
+      return String(x).localeCompare(String(y)) * d;
+    });
+  }
+  return out;
+}
+function fulTable(id, cols, rows, sort) {
+  return '<div class="tw"><table id="' + id + '"><thead><tr>' + cols.map(function (c) {
+    var on = sort && sort.k === c[0];
+    return '<th data-k="' + h(c[0]) + '" style="cursor:pointer">' + h(c[1]) + (on ? (sort.d === 'asc' ? ' ▲' : ' ▼') : '') + '</th>';
+  }).join('') + '</tr></thead><tbody>' + rows.map(function (r, i) {
+    return '<tr data-i="' + i + '" style="cursor:pointer">' + cols.map(function (c) { return '<td>' + (c[2] ? c[2](r[c[0]], r) : h(r[c[0]])) + '</td>'; }).join('') + '</tr>';
+  }).join('') + '</tbody></table></div>';
+}
+function vFul(v) {
+  if (!isMgr()) return go('/q');
+  var f = fulMode(), payload = { mode: f.mode, kind: f.kind };
+  if (f.mode === 'range') { payload.from = f.from; payload.to = f.to; }
+  if (f.mode === 'day') payload.date = f.date;
+  if (f.brand) payload.brand = f.brand;
+  var key = JSON.stringify(payload);
+  if (FUL.data && FUL.key === key && Date.now() - FUL.at < 120000) return renderFul(v, FUL.data, f);
+  v.innerHTML = '<div class="hub"><div class="hub-hero"><div><div class="hub-kicker">IM Warehouse</div><h2>Order vs fulfilment</h2></div></div><p class="muted">Load ho raha hai…</p></div>';
+  call('fulfilment', payload).then(function (d) { FUL.key = key; FUL.data = d; FUL.at = Date.now(); FUL.cust = ''; renderFul(v, d, f); }).catch(function (e) {
+    if (/Unknown action/i.test((e && e.message) || '')) {
+      v.innerHTML = '<div class="hub"><div class="hub-hero"><div><div class="hub-kicker">IM Warehouse</div><h2>Order vs fulfilment</h2></div></div><div class="hub-card"><p>Yeh tab backend ke naye version (Code_v37) ke baad chalega. Apps Script mein <b>Code_v37.gs</b> paste karke deploy karein (Manage deployments, pencil, New version). Schema change nahi hai.</p></div></div>';
+      return;
+    }
+    fail(e);
+  });
+}
+function renderFul(v, d, f) {
+  var k = d.kpi || {}, range = d.range || {}, tab = FUL.tab, period = dmy(range.from) + (range.from === range.to ? '' : ' se ' + dmy(range.to));
+  var brands = (d.brands || []).slice(); if (f.brand && brands.indexOf(f.brand) < 0) brands.unshift(f.brand);
+  function kpi(t, vv, s, cls) { return '<div class="hub-kpi ' + (cls || '') + '"><div class="t">' + h(t) + '</div><div class="v">' + vv + '</div><div class="s">' + s + '</div></div>'; }
+  var html = '<div class="hub">' +
+    '<div class="hub-hero"><div><div class="hub-kicker">IM Warehouse</div><h2>Order vs fulfilment</h2><div class="small muted" style="margin-top:4px">' + h(period) + ' • order date se</div></div>' +
+    '<button class="sm hub-btn" id="fx" style="flex:0">Export CSV</button></div>' +
+    '<div class="hub-controls">' +
+      '<div><label>Period</label><div class="hub-seg" id="fm">' + [['mtd', 'MTD'], ['range', 'Date range'], ['day', 'Specific date']].map(function (x) { return '<button type="button" data-mode="' + x[0] + '" class="' + (f.mode === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('') + '</div></div>' +
+      (f.mode === 'range' ? '<div><label>From</label><input type="date" id="ff" value="' + h(f.from || range.from || '') + '"></div><div><label>To</label><input type="date" id="ft" value="' + h(f.to || range.to || '') + '"></div>' : '') +
+      (f.mode === 'day' ? '<div><label>Date</label><input type="date" id="fd" value="' + h(f.date || range.from || today()) + '"></div>' : '') +
+      '<div><label>Brand</label><select id="fb"><option value="">Saare brands</option>' + brands.map(function (b) { return '<option' + (f.brand === b ? ' selected' : '') + '>' + h(b) + '</option>'; }).join('') + '</select></div>' +
+      '<div><label>Orders</label><div class="hub-seg" id="fk">' + [['all', 'Sab'], ['dealer', 'Dealer'], ['store', 'Store']].map(function (x) { return '<button type="button" data-kind="' + x[0] + '" class="' + (f.kind === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('') + '</div></div>' +
+    '</div>' +
+    '<div class="hub-kpis">' +
+      kpi('Orders', fulNum(k.ordered) + ' pcs', (k.orders || 0) + ' orders • ' + (k.customers || 0) + ' customers' + (k.ordered_value ? ' • ' + fulRs(k.ordered_value) + (k.value_orders < k.orders ? ' (' + k.value_orders + ' orders)' : '') : '')) +
+      kpi('Fulfilled', fulNum(k.fulfilled) + ' pcs', 'Fill ' + (k.fill_pct === '' ? '-' : k.fill_pct + '%') + hubBar(k.fill_pct === '' ? 0 : k.fill_pct), 'hub-good') +
+      kpi('Not fulfilled', fulNum(k.not_fulfilled) + ' pcs', (k.open ? k.open + ' orders (' + fulNum(k.open_pcs) + ' pcs) abhi bill nahi hue' : 'Sab orders bill ho chuke'), 'hub-danger') +
+      kpi('Total sales', fulRs(k.sales), (k.invoices || 0) + ' invoices • bill value', 'hub-gold') +
+      kpi('Orders status', (k.full || 0) + ' / ' + (k.partial || 0) + ' / ' + (k.none || 0), 'Fully / Partly / Not billed' + (k.cancelled ? ' • ' + k.cancelled + ' cancelled' : ''), 'hub-warnk') +
+      kpi('Days to first bill', k.avg_days_to_bill === '' ? '-' : k.avg_days_to_bill, 'Avg, order date se • ' + (k.billed_orders || 0) + ' billed') +
+      kpi('Days to pack', k.avg_days_to_pack === '' ? '-' : k.avg_days_to_pack, 'Avg, order date se') +
+      kpi('Days to dispatch', k.avg_days_to_dispatch === '' ? '-' : k.avg_days_to_dispatch, 'Avg, order date se' + (k.avg_bill_to_dispatch === '' ? '' : ' • bill se ' + k.avg_bill_to_dispatch)) +
+    '</div>' +
+    '<div class="hub-seg" id="ftab" style="margin-bottom:16px;display:inline-flex">' + [['sum', 'Summary'], ['cust', 'Customer-wise'], ['ord', 'Order-wise'], ['art', 'Brand / article']].map(function (x) { return '<button type="button" data-tab="' + x[0] + '" class="' + (tab === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('') + '</div>' +
+    '<div id="fbody"></div></div>';
+  v.innerHTML = html;
+  Array.prototype.forEach.call(document.querySelectorAll('#fm [data-mode]'), function (b) { b.onclick = function () { fulGo({ mode: b.getAttribute('data-mode') }); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('#fk [data-kind]'), function (b) { b.onclick = function () { fulGo({ kind: b.getAttribute('data-kind') }); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('#ftab [data-tab]'), function (b) { b.onclick = function () { FUL.tab = b.getAttribute('data-tab'); FUL.cust = ''; FUL.q = ''; renderFul(v, d, f); }; });
+  if ($('ff')) $('ff').onchange = function () { fulGo({ from: val('ff'), to: val('ft') }); };
+  if ($('ft')) $('ft').onchange = function () { fulGo({ from: val('ff'), to: val('ft') }); };
+  if ($('fd')) $('fd').onchange = function () { fulGo({ date: val('fd') }); };
+  $('fb').onchange = function () { fulGo({ brand: val('fb') }); };
+  fulBody(v, d, f);
+}
+var FUL_COLS = {
+  cust: [['customer', 'Customer', function (x, r) { return '<strong>' + h(x) + '</strong>' + (r.kind === 'store' ? ' <span class="hub-badge hub-warn">Store</span>' : ''); }], ['city', 'City / area'], ['orders', 'Orders'], ['ordered', 'Ordered', fulNum], ['fulfilled', 'Fulfilled', fulNum], ['not_fulfilled', 'Not fulfilled', fulNum], ['fill_pct', 'Fill %', fulPctCell], ['avg_days_to_bill', 'Avg days to bill', fulDays], ['open', 'Open'], ['sales', 'Sales', fulRs], ['last_order', 'Last order', dmy]],
+  ord: [['order_no', 'Order', function (x, r) { return (r.track_no ? '<span class="trk">' + h(r.track_no) + '</span> ' : '') + h(x); }], ['order_date', 'Date', dmy], ['customer', 'Customer'], ['ordered', 'Ordered', fulNum], ['fulfilled', 'Billed', fulNum], ['dispatched_pcs', 'Dispatched', fulNum], ['fill_pct', 'Fill %', fulPctCell], ['days_to_bill', 'Days to bill', fulDays], ['days_to_pack', 'Days to pack', fulDays], ['days_to_dispatch', 'Days to dispatch', fulDays], ['status', 'Status', function (x, r) { return fulStatus(r) + (r.cycles ? ' <span class="small muted">+' + r.cycles + ' leftover</span>' : ''); }], ['sales', 'Sales', fulRs]],
+  art: [['brand', 'Brand'], ['item', 'Article / size', function (x) { return x ? h(x) : '<span class="muted">(brand line)</span>'; }], ['orders', 'Orders'], ['ordered', 'Ordered', fulNum], ['fulfilled', 'Fulfilled', fulNum], ['not_fulfilled', 'Not fulfilled', fulNum], ['fill_pct', 'Fill %', fulPctCell]]
+};
+var FUL_SEARCH = { cust: ['customer', 'city', 'zone'], ord: ['order_no', 'track_no', 'customer', 'city', 'invoice_no', 'stage'], art: ['brand', 'item'] };
+function fulBars(rows) {
+  var max = rows.reduce(function (m, r) { return Math.max(m, r.ordered); }, 0) || 1;
+  return rows.map(function (r, i) {
+    var w = r.ordered / max * 100, g = r.ordered ? r.fulfilled / r.ordered * w : 0;
+    return '<div class="ful-bar" data-i="' + i + '" style="cursor:pointer;margin:0 0 10px">' +
+      '<div style="display:flex;justify-content:space-between;font-size:13px;gap:8px"><span><strong>' + h(r.customer) + '</strong> <span class="muted small">' + h(r.city || '') + '</span></span><span class="small">' + fulNum(r.fulfilled) + ' / ' + fulNum(r.ordered) + ' pcs • ' + (r.fill_pct === '' ? '-' : r.fill_pct + '%') + '</span></div>' +
+      '<div style="display:flex;height:12px;border-radius:4px;overflow:hidden;background:#f1f5f9;margin-top:4px"><i style="width:' + g + '%;background:#10b981"></i><i style="width:' + (w - g) + '%;background:#ef4444"></i></div></div>';
+  }).join('');
+}
+function fulBody(v, d, f) {
+  var b = $('fbody'), tab = FUL.tab;
+  if (FUL.cust) {
+    var c = (d.customers || []).filter(function (x) { return x.key === FUL.cust; })[0] || { customer: '' }, os = (d.orders || []).filter(function (o) { return o.cust_key === FUL.cust; });
+    b.innerHTML = '<div class="hub-card"><div class="hub-head"><h3>' + h(c.customer) + ' <span class="small muted">' + h(c.city || '') + '</span></h3><button class="sm" id="fback" style="flex:0">← Wapas</button></div>' +
+      '<p class="small muted">' + (c.orders || 0) + ' orders • ' + fulNum(c.ordered) + ' pcs ordered • ' + fulNum(c.fulfilled) + ' fulfilled • fill ' + (c.fill_pct === '' ? '-' : c.fill_pct + '%') + ' • avg ' + fulDays(c.avg_days_to_bill) + ' to bill</p>' +
+      os.map(function (o) {
+        return '<div style="border-top:1px solid #e2e8f0;padding:10px 0"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><a href="#/o/' + o.id + '">' + (o.track_no ? '<span class="trk">' + h(o.track_no) + '</span> ' : '') + h(o.order_no) + '</a><span class="small">' + dmy(o.order_date) + ' • ' + fulStatus(o) + ' • bill ' + fulDays(o.days_to_bill) + (o.days_to_dispatch !== '' ? ' • dispatch ' + fulDays(o.days_to_dispatch) : '') + '</span></div>' +
+          '<div class="tw" style="margin-top:6px"><table><thead><tr><th>Brand</th><th>Article</th><th>Ordered</th><th>Fulfilled</th><th>Short</th></tr></thead><tbody>' +
+          o.lines.map(function (l) { return '<tr><td>' + h(l.brand) + '</td><td>' + h(l.item || '-') + '</td><td>' + fulNum(l.ordered) + '</td><td>' + fulNum(l.fulfilled) + '</td><td>' + (l.ordered - l.fulfilled ? '<span class="hub-badge hub-bad">' + fulNum(l.ordered - l.fulfilled) + '</span>' : '0') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+          (o.approx ? '<p class="small muted">Line-wise split andaaza hai (bill order level par hua).</p>' : '') + '</div>';
+      }).join('') + '</div>';
+    $('fback').onclick = function () { FUL.cust = ''; fulBody(v, d, f); };
+    $('fx').onclick = function () { csv(os.reduce(function (a, o) { return a.concat(o.lines.map(function (l) { return { customer: o.customer, order_no: o.order_no, track_no: o.track_no, order_date: o.order_date, status: o.status, brand: l.brand, article: l.item, ordered: l.ordered, fulfilled: l.fulfilled, not_fulfilled: l.ordered - l.fulfilled }; })); }, []), 'fulfilment-' + (c.customer || 'customer').replace(/\W+/g, '-')); };
+    return;
+  }
+  if (tab === 'sum') {
+    var top = (d.customers || []).slice(0, 25), st = d.kpi || {};
+    b.innerHTML = '<div class="hub-card"><div class="hub-head"><h3>Customer-wise ordered vs fulfilled</h3><span class="small muted"><i style="display:inline-block;width:10px;height:10px;background:#10b981;border-radius:2px"></i> Fulfilled &nbsp; <i style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px"></i> Not fulfilled • top ' + top.length + ', tap karke lines dekhein</span></div>' +
+      (top.length ? fulBars(top) : '<p class="muted small">Is period / filter mein koi order nahi.</p>') + '</div>' +
+      '<div class="hub-card"><div class="hub-head"><h3>Brand-wise</h3></div>' + (d.brands_summary && d.brands_summary.length ? '<div class="tw"><table><thead><tr><th>Brand</th><th>Orders</th><th>Ordered</th><th>Fulfilled</th><th>Not fulfilled</th><th>Fill %</th></tr></thead><tbody>' +
+      d.brands_summary.map(function (r) { return '<tr><td><strong>' + h(r.brand || '-') + '</strong></td><td>' + r.orders + '</td><td>' + fulNum(r.ordered) + '</td><td>' + fulNum(r.fulfilled) + '</td><td>' + fulNum(r.not_fulfilled) + '</td><td>' + fulPctCell(r.fill_pct) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="muted small">-</p>') + '</div>' +
+      '<div class="hub-card"><h3 style="margin-bottom:8px">Kaise gina</h3><p class="small muted">Sab pcs mein. <b>Fulfilled</b> = bill hua qty (pehla bill + bill hue leftover cycles), har line ordered tak capped. Line-wise pick na ho to bill qty brands mein ordered ke hisaab se baanti jaati hai. <b>Days to bill</b> = order date se pehle bill ki date tak (IST din), isi tarah pack aur dispatch. <b>Sales</b> = Billing import ki invoice value (ek invoice ek baar), warna order par bhari bill value. Purane orders (SCHEMA 9 se pehle) ki order value nahi hai. Cancelled orders ginti se bahar hain, merged chhupe hain.</p></div>';
+    Array.prototype.forEach.call(b.querySelectorAll('.ful-bar'), function (el) { el.onclick = function () { FUL.cust = top[Number(el.getAttribute('data-i'))].key; fulBody(v, d, f); window.scrollTo(0, 0); }; });
+    $('fx').onclick = function () { csv((d.customers || []).map(fulCustCsv), 'fulfilment-summary'); };
+    return;
+  }
+  var src = tab === 'cust' ? d.customers : tab === 'ord' ? d.orders : d.articles, sort = FUL.sort[tab] || {};
+  var rows = fulRows(src, FUL_SEARCH[tab], FUL.q, sort);
+  b.innerHTML = '<div class="hub-card"><div class="hub-head"><h3>' + { cust: 'Customer-wise', ord: 'Order-wise', art: 'Brand / article-wise' }[tab] + '</h3><span class="small muted">' + rows.length + ' rows</span></div>' +
+    '<input id="fq" placeholder="Search…" value="' + h(FUL.q) + '" style="margin-bottom:12px">' +
+    (tab === 'art' && !d.has_items ? '<p class="small muted">Sales Tracker lines mein sirf brand aata hai, article / size nahi. Isliye yahan brand-wise dikh raha hai.</p>' : '') +
+    '<div id="ftw">' + fulTable('ftb', FUL_COLS[tab], rows, sort) + '</div></div>';
+  function wire() {
+    Array.prototype.forEach.call(document.querySelectorAll('#ftb th[data-k]'), function (th) {
+      th.onclick = function () { var kk = th.getAttribute('data-k'), cur = FUL.sort[tab] || {}; FUL.sort[tab] = { k: kk, d: cur.k === kk && cur.d === 'desc' ? 'asc' : 'desc' }; fulBody(v, d, f); };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('#ftb tbody tr'), function (tr) {
+      tr.onclick = function () { var r = rows[Number(tr.getAttribute('data-i'))]; if (tab === 'cust') { FUL.cust = r.key; fulBody(v, d, f); window.scrollTo(0, 0); } else if (tab === 'ord') go('/o/' + r.id); };
+    });
+  }
+  wire();
+  $('fq').oninput = function () {
+    FUL.q = this.value; rows = fulRows(src, FUL_SEARCH[tab], FUL.q, FUL.sort[tab] || {});
+    $('ftw').innerHTML = fulTable('ftb', FUL_COLS[tab], rows, FUL.sort[tab] || {}); b.querySelector('.hub-head .small').textContent = rows.length + ' rows'; wire();
+  };
+  $('fx').onclick = function () {
+    var period = { period_from: (d.range || {}).from, period_to: (d.range || {}).to, brand: f.brand || 'All', orders: f.kind };
+    if (tab === 'cust') return csv(rows.map(fulCustCsv), 'fulfilment-customers');
+    if (tab === 'ord') return csv(rows.map(function (o) { return Object.assign({ order_no: o.order_no, track_no: o.track_no, order_date: o.order_date, customer: o.customer, city: o.city, type: o.kind, source: o.source, stage: o.stage, ordered_pcs: o.ordered, billed_pcs: o.fulfilled, dispatched_pcs: o.dispatched_pcs, not_fulfilled_pcs: o.not_fulfilled, fill_pct: o.fill_pct, status: o.status, leftover_cycles: o.cycles, invoice_no: o.invoice_no, bill_date: o.bill_date, days_to_bill: o.days_to_bill, days_to_pack: o.days_to_pack, days_to_dispatch: o.days_to_dispatch, bill_to_dispatch_days: o.bill_to_dispatch, ordered_value: o.ordered_value || '', sales_value: o.sales || '' }, period); }), 'fulfilment-orders');
+    csv(rows.map(function (a) { return Object.assign({ brand: a.brand, article: a.item, orders: a.orders, ordered_pcs: a.ordered, fulfilled_pcs: a.fulfilled, not_fulfilled_pcs: a.not_fulfilled, fill_pct: a.fill_pct }, period); }), 'fulfilment-articles');
+  };
+}
+function fulCustCsv(c) { return { customer: c.customer, city: c.city, zone: c.zone, type: c.kind, orders: c.orders, ordered_pcs: c.ordered, fulfilled_pcs: c.fulfilled, not_fulfilled_pcs: c.not_fulfilled, fill_pct: c.fill_pct, fully: c.full, partly: c.partial, not_billed: c.none, open_orders: c.open, avg_days_to_bill: c.avg_days_to_bill, ordered_value: c.ordered_value || '', sales_value: c.sales || '', last_order: c.last_order }; }
 
 function vDash(v) {
   var day = LS.getItem('imw_day') || today();

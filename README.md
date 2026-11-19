@@ -90,3 +90,10 @@ On time for punch / pick / check / bill uses the existing bill SLA deadline (rec
 Frontend sw **im-warehouse-v35**. Backend `Code_v35.gs` (paste + new version). Schema still **20** — no new columns.
 
 Frontend sw **im-warehouse-v36**. Backend schema still **20**.
+
+## Order vs fulfilment
+Admin and warehouse manager: bottom nav **Fulfilment** (`#/ful`). Customer-level order vs execution, in pcs. KPIs: ordered pcs / orders / value, fulfilled, not fulfilled (with orders not yet billed), total sales (bill value), Fully / Partly / Not billed counts, and average days from order date to first bill, pack and dispatch. Tabs: Summary (stacked bars per customer, tap to see that customer's orders and lines; brand-wise table), Customer-wise, Order-wise (tap opens the order), Brand / article. Tables sort on header tap and have search. Filters: MTD, date range, specific date (by order date), brand, and Sab / Dealer / Store orders. CSV export per tab.
+
+Fulfilled = billed qty: the first bill (line picked qty when picked line-wise, else order billed qty shared over lines by ordered qty) plus billed leftover cycles (PendingExec), capped per line at ordered. Sales = Billing import invoice values (each invoice once), else the order's bill value. Sales Tracker lines carry brand only, so the article tab shows brand rows unless an item is filled in.
+
+Frontend sw **im-warehouse-v37**. Backend `Code_v37.gs` (paste + new version), read-only `fulfilment` action. Schema still **20**.
