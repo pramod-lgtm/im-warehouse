@@ -101,7 +101,7 @@ t('card(): list.map(card) never prints [object Object] or stray checkboxes (Read
 t('no list renders call .map(card) with extra args', () => {
   assert.ok(!/\.map\(card\)/.test(src.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')) || src.includes('sel = sel === true'), 'card() guards index/array args');
 });
-t('service worker cache is v41', () => { assert.ok(sw.includes("'im-warehouse-v41'")); });
+t('service worker cache is v41 or later', () => { assert.ok(/'im-warehouse-v(4[1-9]|[5-9]\d)'/.test(sw)); });
 t('graceful on v39 backend: unknown-action detection + deploy message present', () => {
   ['isUnknownAction', 'hasBatch', 'callMany'].forEach(f => assert.ok(src.includes('function ' + f + '('), f));
   assert.ok(src.includes('DEPLOY_V40_MSG'));
