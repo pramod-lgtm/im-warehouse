@@ -93,14 +93,20 @@ function call(action, data, quiet) {
     .then(function (r) { if (!r.ok) throw new Error('Server error ' + r.status); return r.text(); })
     .then(function (s) { try { return JSON.parse(s); } catch (e) { throw new Error('Bad response. API link / deployment (Anyone access) check karein.'); } },
       function (e) { throw new Error(/Server/.test(e.message) ? e.message : 'Network problem, internet check karein.'); })
-    .then(function (r) { if (!quiet) busy(-1); if (!r.ok) { if (r.auth === false) signOut(true); throw new Error(r.error); } return r.data; }, function (e) { if (!quiet) busy(-1); throw e; });
+    .then(function (r) { if (!quiet) busy(-1); if (!r.ok) { if (r.auth === false) signOut(true); throw new Error(r.error); } if (!READ_ACTIONS[action]) cacheClear(); return r.data; }, function (e) { if (!quiet) busy(-1); throw e; });
 }
-function signOut(local) { if (!local) call('logout', {}, true).catch(function () {}); S.token = null; S.user = null; S.m = null; LS.removeItem('imw_token'); LS.removeItem('imw_user'); go('/login'); }
-function masters(force) { if (S.m && !force) return Promise.resolve(S.m); return call('masters').then(function (m) { S.m = m; return m; }); }
+function signOut(local) { if (!local) call('logout', {}, true).catch(function () {}); cacheClear(true); S.token = null; S.user = null; S.m = null; LS.removeItem('imw_token'); LS.removeItem('imw_user'); go('/login'); }
+function masters(force) {
+  if (S.m && !force) return Promise.resolve(S.m);
+  if (mBoot && !force) { mBoot = false; var c = cacheGet('m'); if (c && c.v && c.v.stages) { S.m = c.v; S.mStale = true; return Promise.resolve(S.m); } }
+  mBoot = false;
+  return call('masters').then(function (m) { S.m = m; S.mStale = false; cacheSet('m', m); return m; });
+}
+function refreshMastersQuiet() { if (!S.mStale) return; S.mStale = false; call('masters', {}, true).then(function (m) { S.m = m; cacheSet('m', m); }).catch(function () { S.mStale = true; }); }
 function role() { return S.user && S.user.role; }
 function isMgr() { return role() === 'admin' || role() === 'warehouse_manager'; }
 function isAdmin() { return role() === 'admin'; }
-function can(p) { var P = { view: ['admin', 'warehouse_manager'], bills: ['admin', 'warehouse_manager', 'biller'], hold: ['admin', 'warehouse_manager', 'biller', 'coordinator'], holdmgr: ['admin', 'warehouse_manager', 'coordinator'], delivery: ['admin', 'warehouse_manager', 'dispatch'], sync: ['admin', 'warehouse_manager', 'biller'], manage: ['admin'], recvtime: ['admin', 'warehouse_manager'], routes: ['admin', 'warehouse_manager', 'coordinator'], pendingexec: ['admin', 'warehouse_manager'] }; return (P[p] || []).indexOf(role()) >= 0; }
+function can(p, r) { var P = { merge: ['admin', 'warehouse_manager'], view: ['admin', 'warehouse_manager'], bills: ['admin', 'warehouse_manager', 'biller'], hold: ['admin', 'warehouse_manager', 'biller', 'coordinator'], holdmgr: ['admin', 'warehouse_manager', 'coordinator'], delivery: ['admin', 'warehouse_manager', 'dispatch'], sync: ['admin', 'warehouse_manager', 'biller'], manage: ['admin'], recvtime: ['admin', 'warehouse_manager'], routes: ['admin', 'warehouse_manager', 'coordinator'], pendingexec: ['admin', 'warehouse_manager'] }; return (P[p] || []).indexOf(r || role()) >= 0; }
 function stageLbl(s) { return (S.m && S.m.stage_label[s]) || s; }
 function ono(o) { return o.order_no || (/^W-/.test(o.src_id) ? o.src_id : '#' + o.id); }
 function trk(o) { return o.track_no ? '<span class="trk">' + h(o.track_no) + '</span> ' : ''; }
@@ -150,13 +156,112 @@ function csv(rows, name) {
 }
 function sheet(html) { var d = document.createElement('div'); d.className = 'sheet'; d.innerHTML = '<div>' + html + '<button class="big" data-close style="margin-top:10px">Band karein</button></div>'; d.addEventListener('click', function (e) { if (e.target === d || e.target.hasAttribute('data-close')) d.remove(); }); document.body.appendChild(d); return d; }
 
+// ---------------- v41 speed layer: local cache (stale-while-revalidate), one batched round trip per screen, lazy lists
+var READ_ACTIONS = { storeOrders: 1, masters: 1, me: 1, orders: 1, order: 1, dupList: 1, pendingLeft: 1, billedOrders: 1, dealerPending: 1, dealers: 1, dashboard: 1, clusters: 1, holdList: 1, purchaseList: 1, unmatchedBills: 1, routesList: 1, kalDelivery: 1, vanLogList: 1, unmappedDealers: 1, exportOrders: 1, performance: 1, fulfilment: 1, users: 1, staffList: 1, mergeData: 1, mergeOrdersOf: 1, deleteLog: 1, batch: 1, ping: 1, logout: 1 };
+var CACHE_MAX_CHARS = 1800000;
+function cachePrefix() { return 'imw_c:' + ((S.user && S.user.id) || 0) + ':'; }
+function cacheGet(key) { try { var s = LS.getItem(cachePrefix() + key); return s ? { s: s, v: JSON.parse(s) } : null; } catch (e) { return null; } }
+function cacheSet(key, val, str) {
+  var s = str || JSON.stringify(val); if (s.length > CACHE_MAX_CHARS) return;
+  try { LS.setItem(cachePrefix() + key, s); } catch (e) { cacheClear(); try { LS.setItem(cachePrefix() + key, s); } catch (e2) { /* storage full: cache is optional */ } }
+}
+/** Any write clears cached screens so the next render is fresh (masters stay; they refresh in the background). */
+function cacheClear(all) { var ks = []; for (var i = 0; i < LS.length; i++) { var k = LS.key(i); if (k && k.indexOf('imw_c:') === 0 && (all || !/:m$/.test(k))) ks.push(k); } ks.forEach(function (k) { LS.removeItem(k); }); }
+function debounce(fn, ms) { var t; return function () { var a = arguments, self = this; clearTimeout(t); t = setTimeout(function () { fn.apply(self, a); }, ms); }; }
+function isUnknownAction(e) { return /Unknown action/i.test(String((e && e.message) || e || '')); }
+var DEPLOY_V40_MSG = 'Server par naya backend (Code_v40) abhi deploy nahi hua. Apps Script mein Code_v40 paste karke Manage deployments > pencil > New version karein.';
+function hasBatch() { return !!(S.m && S.m.features && S.m.features.batch) && LS.getItem('imw_nobatch') !== apiUrl(); }
+/**
+ * Many READ calls in one Apps Script execution (v40 batch). Falls back to parallel single calls on a v39 backend.
+ * reqs: [{a, d}] (null entries allowed). Resolves to [{ok, data} | {ok:false, error} | null] in the same order.
+ */
+function callMany(reqs, quiet) {
+  var live = reqs.filter(Boolean);
+  function single() { return Promise.all(reqs.map(function (r) { return r ? call(r.a, r.d || {}, true).then(function (d) { return { ok: true, data: d }; }, function (e) { return { ok: false, error: e && e.message || String(e) }; }) : Promise.resolve(null); })); }
+  if (!quiet) busy(1);
+  var p = live.length > 1 && hasBatch() ? call('batch', { calls: live.map(function (r) { return { a: r.a, d: r.d || {} }; }) }, true).then(function (b) {
+    var i = 0; return reqs.map(function (r) { return r ? (b.results || [])[i++] || { ok: false, error: 'batch' } : null; });
+  }, function (e) { if (isUnknownAction(e)) { LS.setItem('imw_nobatch', apiUrl()); return single(); } throw e; }) : single();
+  return p.then(function (x) { if (!quiet) busy(-1); return x; }, function (e) { if (!quiet) busy(-1); throw e; });
+}
+var mBoot = true;
+/** Masters: from the phone cache on app start (instant), refreshed in the background / inside the first batch. */
+function mastersReq() { return S.mStale ? { a: 'masters', d: {} } : null; }
+function takeMasters(r) { if (r && r.ok && r.data) { S.m = r.data; S.mStale = false; cacheSet('m', r.data); } }
+var loadSeq = 0;
+/** Screen data with stale-while-revalidate. render(rs, mode) mode = 'cache' | 'net' | 'refresh'. */
+function loadViewData(key, reqs, render) {
+  var my = ++loadSeq, mreq = mastersReq(), all = mreq ? [mreq].concat(reqs) : reqs, c = cacheGet(key);
+  if (c) { try { render(c.v, 'cache'); } catch (e) { c = null; } }
+  return callMany(all, !!c).then(function (rs) {
+    if (mreq) { takeMasters(rs[0]); rs = rs.slice(1); }
+    if (my !== loadSeq) return;
+    var s = JSON.stringify(rs); cacheSet(key, rs, s);
+    if (c && c.s === s) return;
+    if (!c) return render(rs, 'net');
+    softRerender(function () { render(rs, 'refresh'); });
+  }).catch(function (e) { if (my !== loadSeq) return; if (!c) fail(e); else toast('Network nahi mila. Phone par saved data dikh raha hai.', 'err'); });
+}
+/** Re-render with fresh data unless the user is typing or a sheet is open; then offer a tap-to-refresh chip. */
+function softRerender(fn) {
+  var ae = document.activeElement, busyUi = document.querySelector('.sheet') || (ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName) && ae.closest && ae.closest('#view'));
+  var old = $('freshchip'); if (old) old.remove();
+  if (!busyUi) { var y = window.scrollY; fn(); window.scrollTo(0, y); return; }
+  var b = document.createElement('button'); b.id = 'freshchip'; b.className = 'freshchip'; b.textContent = '🔄 Naya data aaya, dikhayein';
+  b.onclick = function () { b.remove(); var y = window.scrollY; fn(); window.scrollTo(0, y); };
+  document.body.appendChild(b);
+}
+/** First 40 rows now, the rest as you scroll (big lists were rendering 400-800 cards at once). */
+var LAZY_CHUNK = 40, lazyIO = null;
+function lazyList(el, items, toHtml, opt) {
+  opt = opt || {}; if (!el) return;
+  var i = 0, n = items.length;
+  el.innerHTML = (opt.head || '') + (n ? '' : (opt.empty || ''));
+  function more() {
+    var end = Math.min(n, i + (i ? LAZY_CHUNK * 2 : LAZY_CHUNK)), html = '';
+    for (; i < end; i++) html += toHtml(items[i]);
+    var m = el.querySelector(':scope > .lz-more'); if (m) m.remove();
+    el.insertAdjacentHTML('beforeend', html + (i < n ? '<button type="button" class="lz-more big">Aur dikhayein (' + (n - i) + ' baaki)</button>' : ''));
+    if (opt.after) opt.after(el);
+    var b = el.querySelector(':scope > .lz-more');
+    if (b) { b.onclick = more; if (window.IntersectionObserver) { if (!lazyIO) lazyIO = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting && e.target._more) { lazyIO.unobserve(e.target); e.target._more(); } }); }, { rootMargin: '600px' }); b._more = more; lazyIO.observe(b); } }
+  }
+  if (n) more();
+}
 // ---------------- router
 function go(p) { if (location.hash !== '#' + p) location.hash = '#' + p; else route(); }
-var NAV = [['/q', '📋', 'Meri queue', null], ['/sq', '🛍️', 'Store orders', null], ['/all', '🏬', 'Sab orders', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/perf', '📈', 'Performance', 'view'], ['/ful', '📦', 'Fulfilment', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/admin', '⚙️', 'Admin', 'manage']];
+var NAV = [['/q', '📋', 'Meri queue', null], ['/sq', '🛍️', 'Store orders', null], ['/all', '🏬', 'Sab orders', 'view'], ['/merge', '🔗', 'Merge', 'merge'], ['/dup', '⚠️', 'Duplicates', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/perf', '📈', 'Performance', 'view'], ['/ful', '📦', 'Fulfilment', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/dellog', '🗑️', 'Delete log', 'manage'], ['/admin', '⚙️', 'Admin', 'manage']];
+/** v41 phone nav: 4 main tabs per role + "More" sheet for the rest (admin had 14 tabs in one scrolling bar). */
+var NAV_PRIMARY = {
+  admin: ['/q', '/all', '/disp', '/dash'],
+  warehouse_manager: ['/q', '/all', '/merge', '/disp'],
+  biller: ['/q', '/bills', '/sq'],
+  dispatch: ['/q', '/disp', '/kal', '/sq'],
+  coordinator: ['/q', '/hl', '/van', '/sq'],
+  picker: ['/q', '/sq'], checker: ['/q', '/sq'], packer: ['/q', '/sq']
+};
+/** {primary:[navItem], more:[navItem]} for a role. Everything allowed stays reachable; at most 4 primary + More. */
+function navItemsFor(r) {
+  var allowed = NAV.filter(function (x) { return !x[3] || can(x[3], r); });
+  if (allowed.length <= 5) return { primary: allowed, more: [] };
+  var want = NAV_PRIMARY[r] || ['/q'], primary = [], more = [];
+  want.forEach(function (p) { var x = allowed.filter(function (y) { return y[0] === p; })[0]; if (x && primary.length < 4) primary.push(x); });
+  allowed.forEach(function (x) { if (primary.indexOf(x) < 0) more.push(x); });
+  return { primary: primary, more: more };
+}
+function navActive(cur, p) { return cur === p || cur.indexOf(p + '/') === 0 || (p === '/q' && cur === '/q') || (p === '/sq' && cur.indexOf('/sq') === 0); }
 function nav(cur) {
   var n = $('nav'); if (!S.user) { n.classList.add('hidden'); return; }
-  n.innerHTML = NAV.filter(function (x) { return !x[3] || can(x[3]); }).map(function (x) { return '<a href="#' + x[0] + '" class="' + (cur.indexOf(x[0]) === 0 ? 'on' : '') + '"><i>' + x[1] + '</i>' + x[2] + '</a>'; }).join('');
+  var it = navItemsFor(role()), inMore = it.more.some(function (x) { return navActive(cur, x[0]); });
+  function a(x, cls) { return '<a href="#' + x[0] + '" class="' + (navActive(cur, x[0]) ? 'on ' : '') + (cls || '') + '"><i>' + x[1] + '</i><span>' + x[2] + '</span></a>'; }
+  n.innerHTML = it.primary.map(function (x) { return a(x); }).join('') + it.more.map(function (x) { return a(x, 'nav-x'); }).join('') +
+    (it.more.length ? '<a href="javascript:void 0" id="navmore" class="nav-more' + (inMore ? ' on' : '') + '"><i>☰</i><span>More</span></a>' : '');
   n.classList.remove('hidden');
+  var m = $('navmore'); if (m) m.onclick = function (e) {
+    e.preventDefault();
+    var d = sheet('<h3>Aur pages</h3><div class="moregrid">' + it.more.map(function (x) { return '<a href="#' + x[0] + '" class="' + (navActive(cur, x[0]) ? 'on' : '') + '"><i>' + x[1] + '</i>' + x[2] + '</a>'; }).join('') + '</div>');
+    Array.prototype.forEach.call(d.querySelectorAll('.moregrid a'), function (x) { x.addEventListener('click', function () { d.remove(); }); });
+  };
 }
 function hashQuery() {
   var s = (location.hash.split('?')[1] || ''), o = {};
@@ -168,15 +273,17 @@ function route() {
   if (p !== '/setup' && !S.token) p = '/login';
   $('who').textContent = S.user ? S.user.name + ' (' + S.user.role_label + ')' : '';
   nav(p === '/login' || p === '/setup' ? p : raw.split('?')[0]); document.body.classList.toggle('hub-page', p === '/perf' || p === '/ful'); window.scrollTo(0, 0);
+  loadSeq++; document.querySelectorAll('.sheet').forEach(function (x) { x.remove(); }); var fc = $('freshchip'); if (fc) fc.remove();
   if (p === '/login') return vLogin(v); if (p === '/setup') return vSetup(v);
   masters().then(function () {
+    if (S.mStale && p !== '/q' && p !== '/all') refreshMastersQuiet();
     if (p.indexOf('/o/') === 0) return vOrder(v, Number(p.slice(3)));
     if (p === '/new') return vNew(v, null);
     if (p === '/sq/new') return vStoreNew(v, null);
     if (p.indexOf('/sq/edit/') === 0) return call('order', { id: Number(p.slice(9)) }).then(function (r) { vStoreNew(v, r.order); }).catch(fail);
     if (p === '/sq') return vStoreQueue(v);
     if (p.indexOf('/edit/') === 0) return call('order', { id: Number(p.slice(6)) }).then(function (r) { if (isStore(r.order)) return go('/sq/edit/' + r.order.id); vNew(v, r.order); }).catch(fail);
-    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/kal': vKalDelivery, '/van': vVanPlan, '/dash': vDash, '/perf': vPerf, '/ful': vFul, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList, '/dup': vDups }[p] || vQueue; f(v);
+    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/kal': vKalDelivery, '/van': vVanPlan, '/dash': vDash, '/perf': vPerf, '/ful': vFul, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList, '/dup': vDups, '/merge': vMerge, '/dellog': vDelLog }[p] || vQueue; f(v);
   }).catch(fail);
 }
 window.addEventListener('hashchange', route);
@@ -365,13 +472,15 @@ function pendingWarnHtml(o) {
   return '<div class="small short">⚠ Is dealer ka pehle order mein pending baaki hai: <b>' + pcs(w.remaining) + '</b> (' + (w.orders || []).map(function (x) { return '<a href="#/o/' + x.id + '">' + h(x.track_no || x.order_no || '#' + x.id) + '</a>'; }).join(', ') + '). Naya order mat banao — purane order par Pending executed use karein.</div>';
 }
 function cardInner(o) {
-  return '<div class="row"><b><a href="#/o/' + o.id + '" style="color:inherit;text-decoration:none">' + trk(o) + h(ono(o)) + '</a> ' + dealerLinkHtml(o) + '</b><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div>' +
+  return '<div class="row"><b><a href="#/o/' + o.id + '" style="color:inherit;text-decoration:none">' + trk(o) + h(ono(o)) + '</a> ' + dealerLinkHtml(o) + '</b><span class="pills">' + pill(o) + badges(o) + '</span></div>' +
     '<div class="small">' + slaBadge(o) + '</div><div class="small muted">' + h(dmy(o.order_date)) + ' • ' + (o.zone ? '<b>' + h(o.zone) + '</b> / ' : '') + h(o.area || 'area ?') + (o.route ? ' • ' + h(o.route) : '') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.salesman ? ' • ' + h(o.salesman) : '') + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.expected_date ? ' • exp ' + h(dmy(o.expected_date)) : '') + (o.plan_delivery_date ? ' • plan ' + h(dmy(o.plan_delivery_date)) + (o.plan_van ? ' ' + h(o.plan_van) : '') : '') + '</div>' +
     '<div class="small">' + (o.lines || []).map(function (l) { return h(l.brand) + ' ' + pcs(l.ordered_qty); }).join(' + ') + ((o.lines || []).length > 1 ? ' = <b>' + pcs(o.pcs) + '</b>' : '') +
     [['Punch', o.punch_name], ['P', o.picker_name], ['C', o.checker_name], ['B', o.biller_name], ['Pk', o.packer_name]].filter(function (x) { return x[1]; }).map(function (x) { return ' • ' + x[0] + ': ' + h(x[1]); }).join('') + (o.invoice_no ? ' • Inv ' + h(o.invoice_no) : '') + (o.vehicle || o.delivery_mode ? ' • ' + h(o.vehicle || o.delivery_mode) : '') + (formatBoxes(o) ? ' • ' + h(formatBoxes(o)) : '') + '</div>' +
     (Number(o.hold) ? '<div class="small short">Hold: ' + h(o.hold_reason) + ' ' + h(o.hold_note) + '</div>' : '') + (o.stage === 'cancelled' ? '<div class="small short">Cancel: ' + h(o.cancel_reason) + '</div>' : '') + pendingWarnHtml(o);
 }
 function card(o, sel, extra) {
+  /* v41 fix: list.map(card) passes (o, index, array). Only a real true / string counts. */
+  sel = sel === true; extra = typeof extra === 'string' ? extra : '';
   var body = '<div class="card qcard" data-oid="' + o.id + '" style="cursor:pointer;' + (sel ? 'display:flex;align-items:flex-start;gap:8px' : '') + '">' + (sel ? '<label style="flex:none;padding-top:2px"><input type="checkbox" class="qsel" data-id="' + o.id + '" style="width:22px;height:22px"></label><div style="flex:1">' : '') + cardInner(o) + (extra || '') + (sel ? '</div>' : '') + '</div>';
   return body;
 }
@@ -503,18 +612,21 @@ function openPendingExec(o, ondone) {
 }
 
 function vQueue(v) {
-  var hq = hashQuery();
+  var hq = hashQuery(); S.qdq = null;
   var bk = LS.getItem('imw_bqf') || 'last7', bd1 = LS.getItem('imw_bqd1') || '', bd2 = LS.getItem('imw_bqd2') || '';
   var br0 = billedQRange(bk, bd1, bd2);
-  var jobs = [call('orders', {})];
-  if (can('view')) jobs.push(call('dupList').catch(function () { return null; }));
-  else jobs.push(Promise.resolve(null));
-  jobs.push(call('pendingLeft').catch(function () { return null; }));
-  if (hq.d) jobs.push(call('dealerPending', { dealer_name: hq.d, dealer_src_id: hq.src || '' }).catch(function () { return null; }));
-  else jobs.push(Promise.resolve(null));
-  jobs.push(call('billedOrders', { ready: 1, from: br0[0], to: br0[1] }).catch(function (e) { return { error: e, orders: [], count: 0, from: br0[0], to: br0[1] }; }));
-  jobs.push(call('billedOrders', { delivered: 1, from: br0[0], to: br0[1] }).catch(function (e) { return { error: e, orders: [], count: 0, from: br0[0], to: br0[1] }; }));
-  Promise.all(jobs).then(function (rs) {
+  /* v41: one batched round trip (was 6 calls + masters before them), shown from the phone cache first, refreshed in the background. */
+  var reqs = [{ a: 'orders', d: {} }, can('view') ? { a: 'dupList', d: {} } : null, { a: 'pendingLeft', d: {} }, hq.d ? { a: 'dealerPending', d: { dealer_name: hq.d, dealer_src_id: hq.src || '' } } : null,
+    { a: 'billedOrders', d: { ready: 1, from: br0[0], to: br0[1] } }, { a: 'billedOrders', d: { delivered: 1, from: br0[0], to: br0[1] } }];
+  function pick(r, i) {
+    if (!r) return null;
+    if (i === 0) { if (!r.ok) throw new Error(r.error); return r.data; }
+    if (i >= 4) return r.ok ? r.data : { error: new Error(r.error), orders: [], count: 0, from: br0[0], to: br0[1] };
+    return r.ok ? r.data : null;
+  }
+  loadViewData('q:' + role() + ':' + (hq.d || '') + ':' + (hq.src || '') + ':' + br0.join(','), reqs, function (res, mode) {
+    var rs = res.map(pick);
+    if (mode === 'refresh' && S.qdq != null && !hq.d) hq.d = S.qdq;
     var raw = (rs[0] || []).filter(function (o) { return !isStore(o); }), dupPairs = rs[1], left = rs[2], dealerPend = rs[3], billed = rs[4] || { orders: [], count: 0 }, delivered = rs[5] || { orders: [], count: 0 };
     if (left && left.orders) {
       var leftOnly = left.orders.filter(function (o) { return !isStore(o); });
@@ -603,7 +715,7 @@ function vQueue(v) {
         ? 'Server update baaki hai — Ready for despatch ke liye Code_v36.gs deploy karein.'
         : (lo.length ? '<b>' + lo.length + '</b> orders pack ho chuke (<b>' + rdy + '</b> dispatch baaki). Billed par packing Packing chip se hoti hai.' : 'Is date range mein koi pack hua order nahi.');
       $('qsum').innerHTML = bits.join(' · ') + ': ' + msg + (lo.length ? ' <button type="button" class="sm" id="bex">CSV</button>' : '');
-      $('qlst').innerHTML = lo.length ? lo.map(card).join('') : '<div class="card center muted">' + (billed.needDeploy ? 'Ready for despatch tab server update ke baad khulega.' : 'Is filter mein koi ready order nahi.') + '</div>';
+      lazyList($('qlst'), lo, function (o) { return card(o); }, { empty: '<div class="card center muted">' + (billed.needDeploy ? 'Ready for despatch tab server update ke baad khulega.' : 'Is filter mein koi ready order nahi.') + '</div>' });
       if ($('bex')) $('bex').onclick = function () {
         csv(lo.map(function (o) { var t = parseBoxTypes(o); return { billed_at: o.billed_at, bill_date: o.billed_at, invoice_no: o.invoice_no, tracking_no: o.track_no, order: o.order_no || o.id, dealer: o.dealer_name, stage: o.stage, pcs: o.pcs, billed_value: o.billed_value, boxes: o.boxes || '', baby_boxes: t.baby_box || '', carton_boxes: t.carton || '', box_detail: formatBoxes(o) }; }), 'ready-for-despatch');
       };
@@ -618,7 +730,7 @@ function vQueue(v) {
         ? 'Server update baaki hai — Delivered tab ke liye Code_v39.gs deploy karein.'
         : (lo.length ? '<b>' + lo.length + '</b> orders deliver ho chuke.' : 'Is date range mein koi delivered order nahi.');
       $('qsum').innerHTML = bits.join(' · ') + ': ' + msg + (lo.length ? ' <button type="button" class="sm" id="dex">CSV</button>' : '');
-      $('qlst').innerHTML = lo.length ? lo.map(card).join('') : '<div class="card center muted">' + (delivered.needDeploy ? 'Delivered tab server update ke baad khulega.' : 'Is filter mein koi delivered order nahi.') + '</div>';
+      lazyList($('qlst'), lo, function (o) { return card(o); }, { empty: '<div class="card center muted">' + (delivered.needDeploy ? 'Delivered tab server update ke baad khulega.' : 'Is filter mein koi delivered order nahi.') + '</div>' });
       if ($('dex')) $('dex').onclick = function () {
         csv(lo.map(function (o) { var t = parseBoxTypes(o); return { delivered_at: o.delivered_at, billed_at: o.billed_at, invoice_no: o.invoice_no, tracking_no: o.track_no, order: o.order_no || o.id, dealer: o.dealer_name, stage: o.stage, pcs: o.pcs, billed_value: o.billed_value, boxes: o.boxes || '', baby_boxes: t.baby_box || '', carton_boxes: t.carton || '', box_detail: formatBoxes(o) }; }), 'delivered');
       };
@@ -634,7 +746,8 @@ function vQueue(v) {
       if (qs !== 'billed') {
         var names = {};
         base.forEach(function (o) { if (o.dealer_name) names[o.dealer_name] = 1; });
-        $('qdl_list').innerHTML = Object.keys(names).sort().map(function (n) { return '<option value="' + h(n) + '">'; }).join('');
+        var nk = Object.keys(names).sort(), sig = nk.length + ':' + nk.join('|').length;
+        if ($('qdl_list')._sig !== sig) { $('qdl_list')._sig = sig; $('qdl_list').innerHTML = nk.map(function (n) { return '<option value="' + h(n) + '">'; }).join(''); }
       }
       var mid = base.filter(function (o) { return qDealerOk(o, dq); });
       var pairs = dupPairs != null ? dupPairs : dupPairsFromOrders(raw);
@@ -683,8 +796,8 @@ function vQueue(v) {
       $('qn').textContent = f.length + (r || dq || qs ? ' / ' + list.length : '');
       $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : 'Sab: ') + '<b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>' +
         (canMark ? ' · <button type="button" class="sm primary" id="qmd">Mark duplicate</button> <span class="small muted">2+ orders select karke mark karein</span>' : '');
-      $('qlst').innerHTML = pendHead + (f.length ? f.map(function (o) { return card(o, canMark, qs === 'packing' ? packingDeliverBtn(o) : ''); }).join('') : (pendHead ? '' : '<div class="card center muted">' + ((r || dq || qs) ? 'Is filter mein koi order nahi.' : 'Abhi koi kaam nahi. Pack ho chuke orders Ready for despatch tab mein hain.') + '</div>'));
-      if (qs === 'packing') bindDirectDeliver($('qlst'), f, function () { vQueue(v); });
+      lazyList($('qlst'), f, function (o) { return card(o, canMark, qs === 'packing' ? packingDeliverBtn(o) : ''); }, { head: pendHead, empty: pendHead ? '' : '<div class="card center muted">' + ((r || dq || qs) ? 'Is filter mein koi order nahi.' : 'Abhi koi kaam nahi. Pack ho chuke orders Ready for despatch tab mein hain.') + '</div>',
+        after: function (el) { if (qs === 'packing') bindDirectDeliver(el, f, function () { vQueue(v); }); } });
       Array.prototype.forEach.call(v.querySelectorAll('[data-pex]'), function (b) { b.onclick = function () { var id = Number(b.getAttribute('data-pex')); var o = ((dealerPend && dealerPend.open) || []).filter(function (x) { return Number(x.id) === id; })[0]; if (o) openPendingExec(o, function () { vQueue(v); }); }; });
       if (canMark && $('qmd')) $('qmd').onclick = function () {
         var ids = Array.prototype.map.call(v.querySelectorAll('.qsel:checked'), function (x) { return Number(x.dataset.id); });
@@ -713,16 +826,18 @@ function vQueue(v) {
       else { d2 = this.value; LS.setItem('imw_qd2', d2); draw(); }
     };
     if ($('qdl') && dq) $('qdl').value = dq;
-    $('qdl').oninput = function () {
-      dq = this.value.trim();
+    $('qdl').oninput = debounce(function () {
+      dq = $('qdl') ? $('qdl').value.trim() : ''; S.qdq = dq;
       draw();
-    };
+    }, 180);
     draw(); bindSync(function () { vQueue(v); });
-  }).catch(fail);
+  });
 }
 
 function vAll(v) {
-  call('orders', { all: 1 }).then(function (list) {
+  loadViewData('all', [{ a: 'orders', d: { all: 1 } }], function (res) {
+    if (!res[0] || !res[0].ok) throw new Error((res[0] && res[0].error) || 'orders');
+    var list = res[0].data;
     var st = LS.getItem('imw_f') || '', sf = LS.getItem('imw_sf') || '', pv = LS.getItem('imw_pv') || '', pd = LS.getItem('imw_pd') || '';
     var vans = (S.m.van_plan && S.m.van_plan.vans) || ['DL1LAP-0938', 'DL1LZ-6422'];
     function draw() {
@@ -731,14 +846,14 @@ function vAll(v) {
         return ok && (!sf || srcOf(o) === sf) && (!pv || String(o.plan_van) === pv) && (!pd || String(o.plan_delivery_date) === pd);
       }), q = (val('q') || '').toUpperCase();
       if (q) f = f.filter(function (o) { return (o.track_no + ' ' + ono(o) + ' ' + o.dealer_name + ' ' + o.zone + ' ' + o.area + ' ' + o.route + ' ' + o.invoice_no + ' ' + (o.plan_van || '')).toUpperCase().indexOf(q) >= 0; });
-      $('lst').innerHTML = f.map(card).join('') || '<div class="card center muted">Kuch nahi</div>';
+      lazyList($('lst'), f, function (o) { return card(o); }, { empty: '<div class="card center muted">Kuch nahi</div>' });
     }
     v.innerHTML = '<div class="row"><h2>Sab orders</h2>' + syncBtn() + '<button class="sm" id="ex">CSV</button>' + (function (n) { return '<a class="btn sm' + (n ? ' danger' : '') + '" href="#/dup">⚠ Duplicates' + (n ? ' (' + n + ')' : '') + '</a>'; })(list.filter(function (o) { return (o.dups || []).length; }).length) + '</div><div class="row"><select id="st"><option value="">Sab stage</option>' + S.m.stages.map(function (s) { return '<option value="' + s + '"' + (st === s ? ' selected' : '') + '>' + h(stageLbl(s)) + '</option>'; }).join('') + '<option value="punch_pending"' + (st === 'punch_pending' ? ' selected' : '') + '>Trylo: punching baaki</option><option value="hold"' + (st === 'hold' ? ' selected' : '') + '>HOLD</option><option value="pending_left"' + (st === 'pending_left' ? ' selected' : '') + '>Pending leftover</option><option value="dup"' + (st === 'dup' ? ' selected' : '') + '>⚠ Possible duplicates</option><option value="aaj_plan"' + (st === 'aaj_plan' ? ' selected' : '') + '>Aaj plan delivery</option><option value="kal"' + (st === 'kal' ? ' selected' : '') + '>Kal plan delivery</option><option value="unmapped"' + (st === 'unmapped' ? ' selected' : '') + '>Unmapped area</option><option value="cancelled"' + (st === 'cancelled' ? ' selected' : '') + '>Cancel</option></select><select id="sf"><option value="">Sab source</option>' + ['Sales Tracker'].concat(S.m.sources || []).map(function (x) { return '<option' + (x === sf ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select></div><div class="row"><select id="pv"><option value="">Sab van</option>' + vans.map(function (x) { return '<option value="' + h(x) + '"' + (x === pv ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select><input type="date" id="pd" value="' + h(pd) + '" title="Plan delivery date"><input id="q" placeholder="Tracking / dealer / area / van"></div><div id="lst" style="margin-top:10px"></div>';
     $('st').onchange = function () { st = this.value; LS.setItem('imw_f', st); draw(); }; $('sf').onchange = function () { sf = this.value; LS.setItem('imw_sf', sf); draw(); };
     $('pv').onchange = function () { pv = this.value; LS.setItem('imw_pv', pv); draw(); }; $('pd').onchange = function () { pd = this.value; LS.setItem('imw_pd', pd); draw(); };
-    $('q').oninput = draw; draw(); bindSync(function () { vAll(v); });
+    $('q').oninput = debounce(draw, 180); draw(); bindSync(function () { vAll(v); });
     $('ex').onclick = function () { call('exportOrders').then(function (r) { csv(r, 'warehouse-orders'); }).catch(fail); };
-  }).catch(fail);
+  });
 }
 
 // ---------------- possible duplicates (same dealer, overlapping items/amount, close dates, not yet billed)
@@ -1038,10 +1153,11 @@ function vOrder(v, id) {
     var del = '';
     if (can('delivery') && si >= S.m.stages.indexOf('billed') && o.stage !== 'dispatched' && o.stage !== 'delivered') del = '<div class="card"><h3>Delivery allocation</h3>' + delForm(o) + '<button class="primary big" id="delb" style="margin-top:10px">Save delivery</button></div>';
     var nb = r.nearby.length ? '<div class="card"><h3>Paas ke pending orders (' + r.nearby.length + ')</h3><p class="small muted">Inhe saath mein bill / dispatch karein.</p>' + r.nearby.map(function (x) { return '<div class="chk"><a href="#/o/' + x.id + '">' + h(x.track_no || '#' + x.id) + ' ' + h(x.dealer_name) + '</a><span class="small muted">' + h(x.why) + (x.km !== '' ? ' • ' + x.km + ' km' : '') + ' • ' + h(stageLbl(x.stage)) + (Number(x.hold) ? ' • HOLD' : '') + ' • ' + pcs(x.ordered_qty) + (x.zone ? ' • ' + h(x.zone) : '') + '</span></div>'; }).join('') + '</div>' : '';
-    v.innerHTML = '<div class="card"><div class="row"><h2>' + trk(o) + h(ono(o)) + ' <a href="' + dealerHref(o) + '" style="color:inherit">' + h(o.dealer_name) + '</a></h2><span style="flex:0;white-space:nowrap">' + pill(o) + badges(o) + '</span></div><div class="small muted">Zone ' + h(o.zone || '-') + ' • ' + h(o.area || 'area ?') + ' • ' + h(o.route || '-') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.lat !== '' ? ' • <a target="_blank" href="https://www.google.com/maps?q=' + o.lat + ',' + o.lng + '">map</a>' : '') + '</div>' + '<div class="small" style="margin-top:4px">' + slaBadge(o, true) + (can('recvtime') && o.sla && !o.sla.billed && o.stage !== 'cancelled' ? '<button class="sm" id="rte" style="margin-top:6px">⏱ Order aaya time badlein</button>' : '') + '</div>' + (o.remarks ? '<div class="small">Remark: ' + h(o.remarks) + '</div>' : '') +
+    v.innerHTML = '<div class="card"><div class="row"><h2>' + trk(o) + h(ono(o)) + ' <a href="' + dealerHref(o) + '" style="color:inherit">' + h(o.dealer_name) + '</a></h2><span class="pills">' + pill(o) + badges(o) + '</span></div><div class="small muted">Zone ' + h(o.zone || '-') + ' • ' + h(o.area || 'area ?') + ' • ' + h(o.route || '-') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.lat !== '' ? ' • <a target="_blank" href="https://www.google.com/maps?q=' + o.lat + ',' + o.lng + '">map</a>' : '') + '</div>' + '<div class="small" style="margin-top:4px">' + slaBadge(o, true) + (can('recvtime') && o.sla && !o.sla.billed && o.stage !== 'cancelled' ? '<button class="sm" id="rte" style="margin-top:6px">⏱ Order aaya time badlein</button>' : '') + '</div>' + (o.remarks ? '<div class="small">Remark: ' + h(o.remarks) + '</div>' : '') +
       '<div class="small muted">Source: ' + h(srcOf(o)) + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.salesman ? ' • salesman: ' + h(o.salesman) : '') + (o.expected_date ? ' • expected dispatch ' + h(dmy(o.expected_date)) : '') + (o.edited_at ? ' • edited ' + tm(o.edited_at) + ' ' + h(o.edited_by) : '') + '</div>' +
       (o.stage === 'cancelled' ? '<div class="short">Cancel: ' + h(o.cancel_reason) + ' (' + tm(o.cancelled_at) + ', ' + h(o.cancelled_by) + ')</div>' : '') +
-      (manEdit ? '<div class="row" style="margin-top:8px"><a class="btn sm" href="#/' + (isStore(o) ? 'sq/' : '') + 'edit/' + o.id + '">✏️ Edit</a><button class="sm danger" id="cnl">Cancel order</button></div>' : '') + '</div>' +
+      (manEdit ? '<div class="row" style="margin-top:8px"><a class="btn sm" href="#/' + (isStore(o) ? 'sq/' : '') + 'edit/' + o.id + '">✏️ Edit</a><button class="sm danger" id="cnl">Cancel order</button></div>' : '') +
+      (isAdmin() && mergeOk(o) ? '<div class="row" style="margin-top:8px"><button class="sm danger" id="odel">🗑 Delete order (admin)</button></div>' : '') + '</div>' +
       (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + dupCard(o, r.dup_orders) + (o.merged_into ? '<div class="card short">Ye order duplicate tha, <a href="#/o/' + h(o.merged_into) + '">' + h((o.merged_into_order && (o.merged_into_order.track_no || o.merged_into_order.order_no)) || '#' + o.merged_into) + '</a> mein merge hua (' + tm(o.merged_at) + ', ' + h(o.merged_by) + ')</div>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + (cyc ? '<p class="small short">Leftover cycle chal raha hai — ab ' + h(stageLbl(o.stage)) + (cyc.picker_name ? ', picker ' + h(cyc.picker_name) : '') + '. Pehli pick / bill history same rehti hai.</p>' : '') + tl + qtyEditHistory(r.log) + act + '</div>' + pendingExecCard(o) + waitCard(o) + planCard(o) + hold + del + nb;
     var billPhotos = {};
     if (mine && nx === 'pack') bindPackBoxInputs();
@@ -1066,6 +1182,7 @@ function vOrder(v, id) {
       }
       goStep();
     };
+    if ($('odel')) $('odel').onclick = function () { openDeleteOrder(o, 'order page', function () { go('/q'); }); };
     if ($('cnl')) $('cnl').onclick = function () { var why = prompt('Cancel ka reason?'); if (!why) return; call('cancelOrder', { id: o.id, reason: why }).then(function () { toast('Cancel ho gaya'); vOrder(v, id); }).catch(fail); };
     if ($('oas')) $('oas').onclick = function () { call('orderArea', { id: o.id, zone: val('oz'), area: val('oa'), route: val('or') }).then(function () { S.dl = null; toast('Saved'); vOrder(v, id); }).catch(fail); };
     if (isMgr() && !S.dl) loadDealers().then(function () { var e = $('dlbox'); if (e) e.outerHTML = dlists(); }).catch(function () {});
@@ -1145,7 +1262,7 @@ function vDisp(v) {
     v.innerHTML = '<div class="row"><h2>Delivery allocation</h2><a class="btn sm" href="#/kal">🚐 Kal delivery</a></div><div class="card"><h3>Bill ho chuke, delivery baaki (' + un.length + ')</h3>' + Object.keys(groups).sort().map(function (k) {
       return '<div class="small muted" style="margin-top:8px"><b>' + h(k) + '</b> (' + groups[k].length + ')</div>' + groups[k].map(function (o) { return '<label class="chk"><input type="checkbox" class="sel" value="' + o.id + '"><span><b>' + h(o.track_no || '#' + o.id) + '</b> ' + h(o.dealer_name) + ' • ' + h(o.invoice_no) + ' • ' + pcs(o.billed_qty || o.pcs) + ' • ' + h(stageLbl(o.stage)) + (formatBoxes(o) ? ' • ' + h(formatBoxes(o)) : '') + '</span></label>'; }).join('');
     }).join('') + (un.length ? delForm() + '<button class="primary big" id="go" style="margin-top:10px">Selected ko allocate karein</button>' : '<p class="muted">Sab allocate ho gaye.</p>') + '</div>' +
-      '<div class="card"><h3>Allocated, dispatch baaki (' + al.length + ')</h3>' + al.map(card).join('') + '</div>';
+      '<div class="card"><h3>Allocated, dispatch baaki (' + al.length + ')</h3>' + al.map(function (o) { return card(o); }).join('') + '</div>';
     if ($('go')) $('go').onclick = function () { var ids = Array.prototype.map.call(document.querySelectorAll('.sel:checked'), function (i) { return Number(i.value); }); if (!ids.length) return toast('Orders chunein', 'err'); call('delivery', delData(ids)).then(function () { toast(ids.length + ' allocated'); vDisp(v); }).catch(fail); };
   }).catch(fail);
 }
@@ -1308,13 +1425,9 @@ function kindLbl(k) { var x = PHOTO_KINDS.filter(function (x) { return x[0] === 
 function vStoreQueue(v) {
   var bk = LS.getItem('imw_sbqf') || 'last7', bd1 = LS.getItem('imw_sbqd1') || '', bd2 = LS.getItem('imw_sbqd2') || '';
   var br0 = billedQRange(bk, bd1, bd2);
-  var jobs = [
-    call('storeOrders', {}),
-    call('pendingLeft', { store: 1 }).catch(function () { return null; }),
-    call('billedOrders', { store: 1, ready: 1, from: br0[0], to: br0[1] }).catch(function (e) { return { error: e, orders: [], count: 0, from: br0[0], to: br0[1] }; }),
-    call('billedOrders', { store: 1, delivered: 1, from: br0[0], to: br0[1] }).catch(function (e) { return { error: e, orders: [], count: 0, from: br0[0], to: br0[1] }; })
-  ];
-  Promise.all(jobs).then(function (rs) {
+  var reqs = [{ a: 'storeOrders', d: {} }, { a: 'pendingLeft', d: { store: 1 } }, { a: 'billedOrders', d: { store: 1, ready: 1, from: br0[0], to: br0[1] } }, { a: 'billedOrders', d: { store: 1, delivered: 1, from: br0[0], to: br0[1] } }];
+  loadViewData('sq:' + role() + ':' + br0.join(','), reqs, function (res) {
+    var rs = res.map(function (r, i) { if (i === 0) { if (!r.ok) throw new Error(r.error); return r.data; } if (i === 1) return r.ok ? r.data : null; return r.ok ? r.data : { error: new Error(r.error), orders: [], count: 0, from: br0[0], to: br0[1] }; });
     var raw = (rs[0] || []).filter(isStore);
     var left = rs[1];
     if (left && left.orders) {
@@ -1506,7 +1619,7 @@ function vStoreQueue(v) {
     $('sqst').onchange = function () { stn = this.value; LS.setItem('imw_sqst', stn); draw(); };
     $('sqq').oninput = function () { sq = this.value.trim(); draw(); };
     draw(); bindSync(function () { vStoreQueue(v); });
-  }).catch(fail);
+  });
 }
 
 function vStoreNew(v, ed) {
@@ -1967,7 +2080,7 @@ function vKalDelivery(v) {
             '<div class="small muted">Running: ' + (lg.running_km !== '' && lg.running_km != null ? h(lg.running_km) + ' km' : '—') + (lg.note ? ' • ' + h(lg.note) : '') + '</div>' +
             '<button class="primary" data-van="' + h(s.van) + '" style="margin-top:8px">Save km</button></div>';
         }).join('') +
-        '<div class="card"><h3>Orders</h3>' + (r.orders || []).map(card).join('') + (!(r.orders || []).length ? '<p class="muted">Is din koi open plan order nahi.</p>' : '') + '</div>';
+        '<div class="card"><h3>Orders</h3>' + (r.orders || []).map(function (o) { return card(o); }).join('') + (!(r.orders || []).length ? '<p class="muted">Is din koi open plan order nahi.</p>' : '') + '</div>';
       $('kd').onchange = function () { load(val('kd')); };
       $('kr').onclick = function () { call('refreshVanLog', { date: day }).then(function () { toast('Van log refreshed'); load(day); }).catch(fail); };
       Array.prototype.forEach.call(document.querySelectorAll('[data-van]'), function (b) {
@@ -2089,6 +2202,150 @@ function vVanPlan(v) {
   draw();
 }
 
+// ---------------- v41 Merge tab (warehouse manager + admin): dealer not identified / one dealer under 2 names
+function canMergeUi() { return can('merge'); }
+function canDeleteUi() { return can('merge'); }
+/** Can this order be merged / deleted from the app? (server checks again) */
+function mergeOk(o) { return !!o && ['dispatched', 'delivered', 'cancelled', 'merged'].indexOf(o.stage) < 0 && !o.merged_into; }
+function dealerMatches(d, q) { if (!q) return true; q = q.toUpperCase(); return (String(d.name || '') + ' ' + String(d.area || '') + ' ' + (d.names || []).join(' ') + ' ' + String(d.src_id || '')).toUpperCase().indexOf(q) >= 0; }
+/**
+ * Build the mergeDealers request. st = {keep: 'a'|'b', a: group, b: group, checked: {orderId: true}, combine: bool, combineKeep: orderId, addPcs: bool, note}.
+ * Orders of the other dealer that are ticked move to the kept dealer; with combine, every ticked order that is still before bill joins combineKeep.
+ */
+function buildMergeRequest(st) {
+  var keep = st.keep === 'b' ? st.b : st.a, drop = st.keep === 'b' ? st.a : st.b;
+  if (!keep || !drop) throw new Error('Do dealers chunein');
+  if (keep.key === drop.key) throw new Error('Do alag dealers chunein');
+  var ticked = function (o) { return !!(st.checked || {})[o.id] && mergeOk(o); };
+  var move = (drop.orders || []).filter(ticked).map(function (o) { return o.id; });
+  var req = { keep_key: keep.key, drop_key: drop.key, move_ids: move, note: st.note || '' };
+  if (st.combine) {
+    var pool = (keep.orders || []).concat(drop.orders || []).filter(function (o) { return ticked(o) && Number(o.can_combine); }).map(function (o) { return o.id; });
+    var k = Number(st.combineKeep);
+    if (!k || pool.indexOf(k) < 0) throw new Error('Kaunsa order rakhna hai (jisme baaki judenge) chunein');
+    var drops = pool.filter(function (id) { return id !== k; });
+    if (!drops.length) throw new Error('Jodne ke liye kam se kam 2 open orders tick karein');
+    req.combine = { keep_id: k, drop_ids: drops, add_pcs: st.addPcs === false ? 0 : 1 };
+  }
+  if (!move.length && !req.combine) throw new Error('Doosre dealer ka koi order tick nahi hai');
+  return req;
+}
+function deleteReasonOk(r) { return String(r || '').trim().length >= 3; }
+/** Reason sheet + confirm, then deleteOrder. Used by Merge tab and the admin order page. */
+function openDeleteOrder(o, from, after) {
+  if (!canDeleteUi()) return toast('Sirf admin / warehouse manager delete kar sakte hain', 'err');
+  if (!mergeOk(o)) return toast('Dispatch / deliver / cancel / merge ho chuka order delete nahi ho sakta', 'err');
+  var d = sheet('<h3>🗑 Order delete: ' + h(ono(o)) + '</h3><p class="small">' + h(o.dealer_name) + ' • ' + h(dmy(o.order_date)) + ' • ' + pcs(o.pcs) + ' • ' + h(stageLbl(o.stage)) + (o.invoice_no ? ' • <b class="short">Inv ' + h(o.invoice_no) + '</b>' : '') + '</p>' +
+    '<p class="small muted">Order queue se hat jayega. Poora data (order, lines, kisne, kab, kyun) Delete log mein save rehta hai, admin wapas la sakta hai.</p>' +
+    '<label>Reason (zaroori)</label><textarea id="delr" rows="3" maxlength="300" placeholder="Jaise: galat dealer par bana, duplicate entry, dealer ne cancel bola"></textarea>' +
+    '<button class="danger big" id="delgo" style="margin-top:10px">Delete karein</button>');
+  $('delgo').onclick = function () {
+    var r = val('delr'); if (!deleteReasonOk(r)) return toast('Reason likhna zaroori hai (kam se kam 3 akshar)', 'err');
+    if (!confirm('Pakka delete karein: ' + ono(o) + ' (' + o.dealer_name + ')?' + (o.invoice_no ? ' Is order ka invoice ' + o.invoice_no + ' bhi hai.' : ''))) return;
+    this.disabled = true;
+    call('deleteOrder', { id: o.id, reason: r, from: from || 'app' }).then(function () { d.remove(); toast(ono(o) + ' delete ho gaya (Delete log mein save)'); if (after) after(); })
+      .catch(function (e) { $('delgo').disabled = false; if (isUnknownAction(e)) return toast(DEPLOY_V40_MSG, 'err'); fail(e); });
+  };
+}
+function deployCard(what) { return '<div class="card"><h3>' + h(what) + ' abhi band hai</h3><p>' + h(DEPLOY_V40_MSG) + '</p></div>'; }
+function vMerge(v) {
+  if (!canMergeUi()) { v.innerHTML = '<div class="card">Merge sirf admin / warehouse manager ke liye hai.</div>'; return; }
+  var st = { a: null, b: null, keep: 'a', checked: {}, combine: false, combineKeep: 0, addPcs: true, note: '' }, dealers = [];
+  v.innerHTML = '<div class="row"><h2>🔗 Merge</h2></div><p class="small muted">Jab system dealer pehchan nahi paata (naya / galat naam) ya ek dealer 2 naam se aa raha ho: 2 dealers chunein, kaunsa rakhna hai batayein, orders move karein ya ek order mein jodein. Galat order delete bhi kar sakte hain (reason ke saath, Delete log mein save).</p>' +
+    '<div class="card"><h3>1. Do dealers chunein</h3><div class="grid2m"><div id="pa"></div><div id="pb"></div></div></div><div id="mwork"></div>';
+  function picker(slot) {
+    var el = $(slot === 'a' ? 'pa' : 'pb'), sel = st[slot];
+    if (sel) { el.innerHTML = '<label>Dealer ' + (slot === 'a' ? '1' : '2') + '</label><div class="pickd"><div><b>' + h(sel.name) + '</b>' + (sel.matched ? '' : ' <span class="pill st-hold">Pehchana nahi</span>') + '<div class="small muted">' + h(sel.area || '') + ' • ' + (sel.open || 0) + ' open orders</div></div><button type="button" class="sm" data-chg="' + slot + '">Badlein</button></div>'; el.querySelector('[data-chg]').onclick = function () { st[slot] = null; st.checked = {}; picker(slot); work(); }; return; }
+    el.innerHTML = '<label>Dealer ' + (slot === 'a' ? '1' : '2') + '</label><input id="q' + slot + '" placeholder="Naam / area search" autocomplete="off"><div class="dpick" id="r' + slot + '"></div>';
+    function list() {
+      var q = val('q' + slot), other = st[slot === 'a' ? 'b' : 'a'];
+      var rows = dealers.filter(function (d) { return (!other || d.key !== other.key) && (q ? dealerMatches(d, q) : d.open > 0); }).slice(0, 30);
+      $('r' + slot).innerHTML = rows.map(function (d) { return '<button type="button" class="drow" data-k="' + h(d.key) + '"><b>' + h(d.name) + '</b>' + (d.matched ? '' : ' <span class="pill st-hold">Pehchana nahi</span>') + '<span class="small muted">' + h(d.area || '') + (d.names ? ' • naam: ' + h(d.names.join(' / ')) : '') + ' • ' + d.open + ' open' + (d.open ? ', ' + pcs(d.pcs) : '') + '</span></button>'; }).join('') || '<p class="small muted">Koi dealer nahi mila</p>';
+      Array.prototype.forEach.call($('r' + slot).querySelectorAll('[data-k]'), function (b) { b.onclick = function () { st[slot] = dealers.filter(function (d) { return d.key === b.getAttribute('data-k'); })[0]; st.checked = {}; picker(slot); work(); }; });
+    }
+    $('q' + slot).oninput = debounce(list, 200); list();
+  }
+  function work() {
+    var w = $('mwork'); if (!st.a || !st.b) { w.innerHTML = ''; return; }
+    w.innerHTML = '<div class="card center muted">Orders aa rahe hain...</div>';
+    call('mergeOrdersOf', { keys: [st.a.key, st.b.key] }).then(function (r) {
+      st.a = Object.assign({}, st.a, r.groups[0]); st.b = Object.assign({}, st.b, r.groups[1]);
+      if (!st.keepSet) { st.keep = !Number(st.a.matched) && Number(st.b.matched) ? 'b' : 'a'; }
+      var drop = st.keep === 'b' ? st.a : st.b; (drop.orders || []).forEach(function (o) { if (st.checked[o.id] == null) st.checked[o.id] = true; });
+      drawWork();
+    }).catch(function (e) { w.innerHTML = isUnknownAction(e) ? deployCard('Merge tab') : '<div class="card short">' + h(e.message || e) + '</div>'; });
+  }
+  function ordRow(o, side) {
+    return '<div class="mord"><label class="tick"><input type="checkbox" data-ck="' + o.id + '"' + (st.checked[o.id] ? ' checked' : '') + '></label><div class="mbody"><b>' + trk(o) + h(ono(o)) + '</b> ' + pill(o) + '<div class="small">' + h(dmy(o.order_date)) + ' • ' + (o.lines || []).map(function (l) { return h(l.brand) + ' ' + pcs(l.ordered_qty); }).join(' + ') + ' = <b>' + pcs(o.pcs) + '</b>' + (o.invoice_no ? ' • Inv ' + h(o.invoice_no) : '') + (Number(o.can_combine) ? '' : ' • <span class="muted">billed: sirf move</span>') + '</div>' +
+      (st.combine && Number(o.can_combine) && st.checked[o.id] ? '<label class="small radio"><input type="radio" name="ckeep" value="' + o.id + '"' + (Number(st.combineKeep) === o.id ? ' checked' : '') + '> Ye order rakhein (baaki isme judenge)</label>' : '') +
+      '</div><button type="button" class="sm danger" data-del="' + o.id + '" title="Delete">🗑</button></div>';
+  }
+  function drawWork() {
+    var keep = st.keep === 'b' ? st.b : st.a, drop = st.keep === 'b' ? st.a : st.b;
+    function side(g, which) {
+      return '<div class="card' + (st.keep === which ? ' keepcard' : '') + '"><label class="radio big-radio"><input type="radio" name="mkeep" value="' + which + '"' + (st.keep === which ? ' checked' : '') + '> <b>Ye dealer rakhein</b></label><h3>' + h(g.name) + (g.matched ? '' : ' <span class="pill st-hold">Pehchana nahi</span>') + '</h3><p class="small muted">' + h(g.area || '') + (g.src_id ? ' • id ' + h(g.src_id) : ' • dealer id nahi') + ' • ' + (g.orders || []).length + ' open orders</p>' +
+        ((g.orders || []).map(function (o) { return ordRow(o, which); }).join('') || '<p class="small muted">Koi open order nahi</p>') + '</div>';
+    }
+    var nMove = (drop.orders || []).filter(function (o) { return st.checked[o.id]; }).length;
+    $('mwork').innerHTML = '<h3 style="margin:12px 2px 6px">2. Kaunsa dealer rakhna hai?</h3>' + side(st.a, 'a') + side(st.b, 'b') +
+      '<div class="card"><h3>3. Merge</h3><p class="small">Tick kiye <b>' + nMove + '</b> orders <b>' + h(drop.name) + '</b> se <b>' + h(keep.name) + '</b> par chale jayenge (naam, area, route bhi).</p>' +
+      '<label class="radio"><input type="checkbox" id="mcomb"' + (st.combine ? ' checked' : '') + '> Tick kiye open (bill se pehle) orders ko ek order mein jodo</label>' +
+      (st.combine ? '<p class="small muted">Upar kisi order par "Ye order rakhein" chunein.</p><label class="radio"><input type="checkbox" id="mpcs"' + (st.addPcs ? ' checked' : '') + '> Lines / pcs jod do (band = sirf ek rakhein)</label>' : '') +
+      '<label>Note (optional)</label><input id="mnote" value="' + h(st.note) + '" placeholder="Jaise: same shop, naya naam">' +
+      '<button class="primary big" id="mgo" style="margin-top:10px">Merge karein</button></div>';
+    Array.prototype.forEach.call(document.querySelectorAll('input[name=mkeep]'), function (x) { x.onchange = function () { st.keep = x.value; st.keepSet = true; var dr = st.keep === 'b' ? st.a : st.b; (dr.orders || []).forEach(function (o) { st.checked[o.id] = true; }); drawWork(); }; });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-ck]'), function (x) { x.onchange = function () { st.checked[Number(x.getAttribute('data-ck'))] = x.checked; drawWork(); }; });
+    Array.prototype.forEach.call(document.querySelectorAll('input[name=ckeep]'), function (x) { x.onchange = function () { st.combineKeep = Number(x.value); }; });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-del]'), function (b) { b.onclick = function () { var id = Number(b.getAttribute('data-del')); var o = (st.a.orders || []).concat(st.b.orders || []).filter(function (x) { return x.id === id; })[0]; if (o) openDeleteOrder(o, 'merge tab', function () { work(); }); }; });
+    $('mcomb').onchange = function () { st.combine = this.checked; if (st.combine && !st.combineKeep) { var first = (keep.orders || []).concat(drop.orders || []).filter(function (o) { return st.checked[o.id] && Number(o.can_combine); })[0]; if (first) st.combineKeep = first.id; } drawWork(); };
+    if ($('mpcs')) $('mpcs').onchange = function () { st.addPcs = this.checked; };
+    $('mnote').oninput = function () { st.note = this.value; };
+    $('mgo').onclick = function () {
+      var req; try { req = buildMergeRequest(st); } catch (e) { return toast(e.message, 'err'); }
+      var msg = (req.move_ids.length ? req.move_ids.length + ' orders "' + drop.name + '" se "' + keep.name + '" par jayenge.' : '') + (req.combine ? ' ' + (req.combine.drop_ids.length + 1) + ' orders ek order mein judenge.' : '') + ' Aage badhein?';
+      if (!confirm(msg)) return;
+      var btn = this; btn.disabled = true;
+      call('mergeDealers', req).then(function (r) { toast('Merge ho gaya ✔ ' + r.moved + ' orders ' + r.keep_dealer + ' par' + (r.combined ? ', ' + (r.combined.merged_ids.length + 1) + ' orders jude' : '')); S.mergeDealersCache = null; vMerge(v); })
+        .catch(function (e) { btn.disabled = false; if (isUnknownAction(e)) return toast(DEPLOY_V40_MSG, 'err'); fail(e); });
+    };
+  }
+  call('mergeData').then(function (r) { dealers = r.dealers || []; picker('a'); picker('b'); })
+    .catch(function (e) { $('mwork').innerHTML = isUnknownAction(e) ? deployCard('Merge tab') : ''; if (!isUnknownAction(e)) fail(e); $('pa').innerHTML = ''; $('pb').innerHTML = ''; });
+}
+// ---------------- v41 Delete log (admin only, separate page): deleted orders + merges, search, CSV, restore
+function vDelLog(v) {
+  if (!isAdmin()) { v.innerHTML = '<div class="card">Delete log sirf admin dekh sakta hai.</div>'; return; }
+  var tab = LS.getItem('imw_dlt') || 'del';
+  call('deleteLog').then(function (r) {
+    var del = r.deleted || [], mer = r.merges || [];
+    v.innerHTML = '<div class="row"><h2>🗑️ Delete log</h2><button class="sm" id="dlcsv">CSV</button></div><p class="small muted">Har delete ka poora record: order, lines, kisne, kab, kyun. Galti se delete hua ho to Restore karein. Merges bhi yahin dikhte hain.</p>' +
+      '<div class="seg"><button type="button" data-t="del">Deleted (' + del.length + ')</button><button type="button" data-t="mer">Merges (' + mer.length + ')</button></div>' +
+      '<input id="dlq" placeholder="Order / dealer / reason / naam search" autocomplete="off" style="margin-bottom:8px"><div id="dll"></div>';
+    function rows() {
+      var q = val('dlq').toUpperCase(), src = tab === 'del' ? del : mer;
+      return q ? src.filter(function (x) { return JSON.stringify(x).toUpperCase().indexOf(q) >= 0; }) : src;
+    }
+    function draw() {
+      Array.prototype.forEach.call(v.querySelectorAll('[data-t]'), function (b) { b.classList.toggle('on', b.getAttribute('data-t') === tab); });
+      var list = rows();
+      lazyList($('dll'), list, tab === 'del' ? function (x) {
+        return '<div class="card"><div class="row"><b>' + (x.track_no ? '<span class="trk">' + h(x.track_no) + '</span> ' : '') + h(x.order_no || '#' + x.order_id) + ' ' + h(x.dealer_name) + '</b><span style="flex:0;white-space:nowrap"><span class="pill ' + (x.kind === 'dup_delete' ? 'src' : 'st-hold') + '">' + (x.kind === 'dup_delete' ? 'Duplicate delete' : 'Delete') + '</span>' + (x.restored_at ? ' <span class="pill st-packed">Restored</span>' : '') + '</span></div>' +
+          '<div class="small">' + h(dmy(x.order_date)) + ' • ' + pcs(x.pcs) + ' • stage ' + h(stageLbl(x.stage)) + (x.invoice_no ? ' • Inv ' + h(x.invoice_no) : '') + ' • ' + (x.lines || []).map(function (l) { return h(l.brand) + ' ' + pcs(l.ordered_qty); }).join(' + ') + '</div>' +
+          '<div class="small"><b>Reason:</b> ' + h(x.reason) + '</div><div class="small muted">' + h(x.deleted_by) + (x.deleted_role ? ' (' + h(x.deleted_role) + ')' : '') + ' • ' + tm(x.deleted_at) + (x.restored_at ? ' • restored ' + tm(x.restored_at) + ' ' + h(x.restored_by) : '') + '</div>' +
+          (x.restored_at ? '' : '<button type="button" class="sm" data-rs="' + x.id + '" style="margin-top:6px">↩ Restore</button>') + '</div>';
+      } : function (x) {
+        return '<div class="card"><div class="row"><b>' + (x.kind === 'dealer_merge' ? 'Dealer merge' : 'Order merge') + '</b><span class="small muted" style="flex:0;white-space:nowrap">' + tm(x.at) + '</span></div><div class="small">' + (x.drop_dealer_name ? h(x.drop_dealer_name) + ' → ' : '') + '<b>' + h(x.keep_dealer_name) + '</b></div>' +
+          '<div class="small">' + (x.order_ids ? 'Orders: ' + h(x.order_ids) : '') + (x.keep_order_id ? ' • rakha #' + h(x.keep_order_id) + ', jude: ' + h(x.merged_order_ids) : '') + (x.pcs !== '' && x.pcs != null ? ' • ' + pcs(x.pcs) : '') + '</div>' + (x.note ? '<div class="small muted">' + h(x.note) + '</div>' : '') + '<div class="small muted">' + h(x.by_name) + ' (' + h(x.role) + ')</div></div>';
+      }, { empty: '<div class="card center muted">Kuch nahi</div>', after: function (el) {
+        Array.prototype.forEach.call(el.querySelectorAll('[data-rs]'), function (b) { b.onclick = function () { if (!confirm('Yeh order wapas queue mein laayein?')) return; call('restoreDeleted', { id: Number(b.getAttribute('data-rs')) }).then(function (x) { toast('Restore ho gaya #' + x.restored); vDelLog(v); }).catch(fail); }; });
+      } });
+    }
+    Array.prototype.forEach.call(v.querySelectorAll('[data-t]'), function (b) { b.onclick = function () { tab = b.getAttribute('data-t'); LS.setItem('imw_dlt', tab); draw(); }; });
+    $('dlq').oninput = debounce(draw, 200);
+    $('dlcsv').onclick = function () { csv(rows().map(function (x) { var y = Object.assign({}, x); if (y.lines) y.lines = y.lines.map(function (l) { return l.brand + ' ' + l.ordered_qty; }).join(' + '); return y; }), tab === 'del' ? 'delete-log' : 'merge-log'); };
+    draw();
+  }).catch(function (e) { if (isUnknownAction(e)) v.innerHTML = deployCard('Delete log'); else fail(e); });
+}
 function vAdmin(v) {
   Promise.all([call('users'), call('staffList')]).then(function (rr) { var us = rr[0]; S.m.staffAll = rr[1];
     v.innerHTML = '<h2>Admin</h2><div class="card"><h3>Users</h3>' + table(us, [['username', 'Login'], ['name', 'Naam'], ['role_label', 'Role'], ['active', 'Active', function (x) { return Number(x) ? 'Haan' : 'Nahi'; }], ['id', '', function (x) { return '<button class="sm" data-u="' + x + '">Edit</button>'; }]]) +

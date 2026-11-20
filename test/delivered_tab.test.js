@@ -48,7 +48,7 @@ assert.ok(src.indexOf("billedOrders', { delivered: 1") >= 0 || src.indexOf('bill
 assert.ok(src.indexOf("{ delivered: 1") >= 0 || src.indexOf("delivered: 1") >= 0);
 assert.ok(src.indexOf("data-deliv") >= 0);
 assert.ok(src.indexOf('Delivered mark karein') >= 0);
-assert.ok(sw.indexOf("im-warehouse-v40") >= 0);
+assert.ok(/im-warehouse-v(4[0-9]|[5-9][0-9])/.test(sw)); // v40 or later
 
 // Date parsing: ISO, timestamp, DD-MM-YYYY, fallback created_at
 assert.equal(ctx.orderDateYmd({ order_date: '2026-11-09' }), '2026-11-09');
