@@ -13,5 +13,5 @@ assert.ok(src.indexOf("'/ful': vFul") >= 0, 'route');
 assert.ok(/function vFul\(v\) \{\n  if \(!isMgr\(\)\) return go\('\/q'\);/.test(src), 'admin / manager only');
 assert.ok(src.indexOf("call('fulfilment', payload)") >= 0);
 ['fulfilment-customers', 'fulfilment-orders', 'fulfilment-articles', 'fulfilment-summary'].forEach(n => assert.ok(src.indexOf(n) >= 0, 'csv ' + n));
-assert.ok(/const C='im-warehouse-v3[7-9]'/.test(fs.readFileSync(__dirname + '/../sw.js', 'utf8')));
+assert.ok(/const C='im-warehouse-v(3[7-9]|4\d)'/.test(fs.readFileSync(__dirname + '/../sw.js', 'utf8')));
 console.log('fulfilment_ui ok');
