@@ -123,7 +123,7 @@ function planBadge(o) {
   if (Number(o.plan_override)) bits.push('<span class="pill src">Override</span>');
   return bits.length ? ' ' + bits.join(' ') : '';
 }
-function badges(o) { return ' <span class="pill src">' + h(srcOf(o)) + '</span>' + (o.priority === 'Urgent' ? ' <span class="pill st-hold">URGENT</span>' : '') + ((o.dups || []).length ? ' <span class="pill st-hold" title="Same dealer, overlapping items / amount, paas ki date">⚠ Possible duplicate</span>' : '') + (o.pending_status === 'open' && Number(o.pending_qty) > 0 ? ' <span class="pill st-hold">Pending leftover ' + pcs(o.pending_qty) + '</span>' : '') + (o.pending_status === 'complete' ? ' <span class="pill" style="background:#e6f4ea;color:#1e7e34">Pending complete</span>' : '') + planBadge(o); }
+function badges(o) { return ' <span class="pill src">' + h(srcOf(o)) + '</span>' + (o.priority === 'Urgent' ? ' <span class="pill st-hold">URGENT</span>' : '') + ((o.dups || []).length ? ' <span class="pill st-hold" title="Same dealer, overlapping items / amount, paas ki date">⚠ Possible duplicate</span>' : '') + (o.pending_status === 'open' && Number(o.pending_qty) > 0 ? ' <span class="pill st-hold">Pending leftover ' + pcs(o.pending_qty) + '</span>' : '') + (o.pending_status === 'complete' ? ' <span class="pill" style="background:#e6f4ea;color:#1e7e34">Pending complete</span>' : '') + ((o.pending_tag || Number(o.parent_order_id) > 0) ? ' <span class="pill pe" style="background:#efe3ff;color:#5b2a86" title="' + h('Purana order: ' + (o.parent_order_no || '')) + '">↩ Pending executed</span>' : '') + (o.carry_month && o.stage !== 'delivered' ? ' <span class="pill" style="background:#fff4e0;color:#8a5a00" title="Pichhle mahine se carry forward">↪ Carried ' + h(o.carry_month) + '</span>' : '') + planBadge(o); }
 function pill(o) { return '<span class="pill st-' + h(o.stage) + '">' + h(stageLbl(o.stage)) + '</span>' + (o.stage === 'new' && Number(o.needs_punch) ? ' <span class="pill st-hold">Trylo: punching baaki</span>' : '') + (Number(o.hold) ? ' <span class="pill st-hold">HOLD</span>' : ''); }
 // ---------------- SLA (bill within deadline)
 var SLA_CLS = { 'On time': 'sla-ok', 'Due soon': 'sla-soon', 'Delayed': 'sla-late', 'Waiting for stock': 'sla-wait' };
@@ -157,7 +157,7 @@ function csv(rows, name) {
 function sheet(html) { var d = document.createElement('div'); d.className = 'sheet'; d.innerHTML = '<div>' + html + '<button class="big" data-close style="margin-top:10px">Band karein</button></div>'; d.addEventListener('click', function (e) { if (e.target === d || e.target.hasAttribute('data-close')) d.remove(); }); document.body.appendChild(d); return d; }
 
 // ---------------- v41 speed layer: local cache (stale-while-revalidate), one batched round trip per screen, lazy lists
-var READ_ACTIONS = { storeOrders: 1, masters: 1, me: 1, orders: 1, order: 1, dupList: 1, pendingLeft: 1, billedOrders: 1, dealerPending: 1, dealers: 1, dashboard: 1, clusters: 1, holdList: 1, purchaseList: 1, unmatchedBills: 1, routesList: 1, kalDelivery: 1, vanLogList: 1, unmappedDealers: 1, exportOrders: 1, performance: 1, fulfilment: 1, users: 1, staffList: 1, mergeData: 1, mergeOrdersOf: 1, deleteLog: 1, batch: 1, ping: 1, logout: 1 };
+var READ_ACTIONS = { archiveSearch: 1, archivePreview: 1, storeOrders: 1, masters: 1, me: 1, orders: 1, order: 1, dupList: 1, pendingLeft: 1, billedOrders: 1, dealerPending: 1, dealers: 1, dashboard: 1, clusters: 1, holdList: 1, purchaseList: 1, unmatchedBills: 1, routesList: 1, kalDelivery: 1, vanLogList: 1, unmappedDealers: 1, exportOrders: 1, performance: 1, fulfilment: 1, users: 1, staffList: 1, mergeData: 1, mergeOrdersOf: 1, deleteLog: 1, batch: 1, ping: 1, logout: 1 };
 var CACHE_MAX_CHARS = 1800000;
 function cachePrefix() { return 'imw_c:' + ((S.user && S.user.id) || 0) + ':'; }
 function cacheGet(key) { try { var s = LS.getItem(cachePrefix() + key); return s ? { s: s, v: JSON.parse(s) } : null; } catch (e) { return null; } }
@@ -230,7 +230,7 @@ function lazyList(el, items, toHtml, opt) {
 }
 // ---------------- router
 function go(p) { if (location.hash !== '#' + p) location.hash = '#' + p; else route(); }
-var NAV = [['/q', '📋', 'Meri queue', null], ['/sq', '🛍️', 'Store orders', null], ['/all', '🏬', 'Sab orders', 'view'], ['/merge', '🔗', 'Merge', 'merge'], ['/dup', '⚠️', 'Duplicates', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/perf', '📈', 'Performance', 'view'], ['/ful', '📦', 'Fulfilment', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/dellog', '🗑️', 'Delete log', 'manage'], ['/admin', '⚙️', 'Admin', 'manage']];
+var NAV = [['/q', '📋', 'Meri queue', null], ['/sq', '🛍️', 'Store orders', null], ['/all', '🏬', 'Sab orders', 'view'], ['/merge', '🔗', 'Merge', 'merge'], ['/dup', '⚠️', 'Duplicates', 'view'], ['/cl', '📍', 'Cluster', 'view'], ['/dl', '🏪', 'Dealers', 'view'], ['/bills', '🧾', 'Billing', 'bills'], ['/disp', '🚚', 'Delivery', 'delivery'], ['/kal', '🚐', 'Kal delivery', 'delivery'], ['/van', '🗺️', 'Van plan', 'routes'], ['/dash', '📊', 'Dashboard', 'view'], ['/perf', '📈', 'Performance', 'view'], ['/ful', '📦', 'Fulfilment', 'view'], ['/hl', '⛔', 'Hold list', 'holdmgr'], ['/arch', '🗄️', 'Archive', 'pendingexec'], ['/dellog', '🗑️', 'Delete log', 'manage'], ['/admin', '⚙️', 'Admin', 'manage']];
 /** v41 phone nav: 4 main tabs per role + "More" sheet for the rest (admin had 14 tabs in one scrolling bar). */
 var NAV_PRIMARY = {
   admin: ['/q', '/all', '/disp', '/dash'],
@@ -283,7 +283,7 @@ function route() {
     if (p.indexOf('/sq/edit/') === 0) return call('order', { id: Number(p.slice(9)) }).then(function (r) { vStoreNew(v, r.order); }).catch(fail);
     if (p === '/sq') return vStoreQueue(v);
     if (p.indexOf('/edit/') === 0) return call('order', { id: Number(p.slice(6)) }).then(function (r) { if (isStore(r.order)) return go('/sq/edit/' + r.order.id); vNew(v, r.order); }).catch(fail);
-    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/kal': vKalDelivery, '/van': vVanPlan, '/dash': vDash, '/perf': vPerf, '/ful': vFul, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList, '/dup': vDups, '/merge': vMerge, '/dellog': vDelLog }[p] || vQueue; f(v);
+    var f = { '/q': vQueue, '/all': vAll, '/cl': vClusters, '/bills': vBills, '/disp': vDisp, '/kal': vKalDelivery, '/van': vVanPlan, '/dash': vDash, '/perf': vPerf, '/ful': vFul, '/dl': vDealers, '/admin': vAdmin, '/pr': vPurchase, '/hl': vHoldList, '/dup': vDups, '/merge': vMerge, '/dellog': vDelLog, '/arch': vArchive }[p] || vQueue; f(v);
   }).catch(fail);
 }
 window.addEventListener('hashchange', route);
@@ -566,7 +566,7 @@ function billedQRange(k, d1, d2) {
 function leftoverCard(o) {
   var lines = (o.pending_lines || []).filter(function (l) { return Number(l.remaining) > 0; }).map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ' ' + pcs(l.remaining); }).join(' + ');
   var cyc = o.pending_cycle_info || (Number(o.pending_cycle) ? { cycle_status: o.stage, picker_name: o.picker_name } : null);
-  var btn = can('pendingexec') && o.pending_status === 'open' && !cyc ? ' <button type="button" class="sm primary" data-pex="' + o.id + '">Pending executed</button>' : '';
+  var btn = can('pendingexec') && o.pending_status === 'open' && !cyc ? ' <button type="button" class="sm primary" data-pex="' + o.id + '">' + (hasPendingChild() ? 'Execute pending → naya order' : 'Pending executed') + '</button>' : '';
   var cycNote = cyc ? ' • <span class="short">Cycle chal raha: ' + h(stageLbl(o.stage)) + (cyc.picker_name ? ' • picker ' + h(cyc.picker_name) : '') + '</span>' : '';
   return '<div class="card qcard" data-oid="' + o.id + '" style="cursor:pointer">' + cardInner(o) + '<div class="small">Baaki: <b>' + pcs(o.pending_qty) + '</b>' + (lines ? ' • ' + lines : '') + cycNote + btn + '</div></div>';
 }
@@ -604,11 +604,191 @@ function openPendingExec(o, ondone) {
   if (!can('pendingexec')) return toast('Sirf warehouse manager pending execute kar sakte hain', 'err');
   if (o.pending_cycle || (o.pending_cycle_info && o.pending_cycle_info.cycle_status && o.pending_cycle_info.cycle_status !== 'billed')) return toast('Yeh order pehle se picking / billing cycle mein hai', 'err');
   if (o.pending_status !== 'open' || !(Number(o.pending_qty) > 0)) return toast('Is order par leftover pending nahi hai', 'err');
+  if (hasPendingChild()) {
+    /* v43: new model. Show every open pending line of this dealer (all old orders), create one NEW order. */
+    return call('dealerPending', { dealer_name: o.dealer_name, dealer_src_id: o.dealer_src_id || '' }).then(function (r) { openDealerExecute(o, (r && r.open) || [], ondone); })
+      .catch(function () { openDealerExecute(o, S.leftAll || [], ondone); });
+  }
   if (!(o.pending_lines && o.pending_lines.length)) {
     return call('order', { id: o.id }).then(function (r) { openPendingExec(r.order, ondone); }).catch(fail);
   }
   sheet(pendingExecFormHtml(o));
   bindPendingExecForm(o, ondone);
+}
+
+// ---------------- v43: Pending executed = NEW order per dealer (bulk tick + push), month-end Archive view
+function hasPendingChild() { return !!(S.m && S.m.features && S.m.features.pending_child); }
+function isPendingChildC(o) { return !!(o && (o.pending_tag || (o.parent_order_id !== '' && o.parent_order_id != null && Number(o.parent_order_id) > 0))); }
+function normDealerC(s) { return String(s || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+function sameDealerC(a, b) {
+  if (!a || !b) return false;
+  var x = String(a.dealer_src_id || '').trim(), y = String(b.dealer_src_id || '').trim();
+  if (x && y) return x === y;
+  return normDealerC(a.dealer_name) === normDealerC(b.dealer_name);
+}
+function dealerKeyC(o) { var s = String(o && o.dealer_src_id || '').trim(); return s ? 'S:' + s : 'N:' + normDealerC(o && o.dealer_name); }
+/** Open pending lines of open-pending orders -> flat rows [{key, dealer, o, line, rem}] (filters: brand, month yyyy-mm). */
+function pendingRows(orders, f) {
+  f = f || {}; var out = [];
+  (orders || []).forEach(function (o) {
+    if (o.pending_status !== 'open' || !(Number(o.pending_qty) > 0)) return;
+    if (f.month && String(o.order_date || '').slice(0, 7) !== f.month) return;
+    var ls = (o.pending_lines || []).filter(function (l) { return Number(l.remaining) > 0; });
+    if (!ls.length) ls = [{ line_id: '', brand: (o.lines && o.lines[0] && o.lines[0].brand) || '', item: '', remaining: Number(o.pending_qty) }];
+    ls.forEach(function (l) {
+      if (f.brand && String(l.brand || '').toUpperCase() !== f.brand) return;
+      out.push({ key: dealerKeyC(o), dealer: o.dealer_name || '', o: o, line: l, rem: Number(l.remaining) || 0 });
+    });
+  });
+  return out;
+}
+/** Group rows by dealer, first-seen order. */
+function groupRowsByDealer(rows) {
+  var m = {}, list = [];
+  rows.forEach(function (r) { var g = m[r.key]; if (!g) { g = m[r.key] = { key: r.key, dealer: r.dealer, rows: [], pcs: 0, orders: {} }; list.push(g); } g.rows.push(r); g.pcs += r.rem; g.orders[r.o.id] = 1; });
+  list.forEach(function (g) { g.order_count = Object.keys(g.orders).length; });
+  return list;
+}
+/** Summary of a selection [{order_id,line_id,qty}] -> {dealers, orders, pcs}. */
+function execSelectionSummary(sel, ordersById) {
+  var d = {}, o = {}, p = 0;
+  (sel || []).forEach(function (x) { var od = ordersById[x.order_id]; d[od ? dealerKeyC(od) : 'X' + x.order_id] = 1; o[x.order_id] = 1; p += Number(x.qty) || 0; });
+  return { dealers: Object.keys(d).length, orders: Object.keys(o).length, pcs: p };
+}
+function pendingLineRowHtml(r, checked, cls) {
+  var o = r.o, l = r.line;
+  return '<div class="pbrow" style="display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid #eef0f4">' +
+    '<input type="checkbox" class="' + cls + 'sel" data-o="' + o.id + '" data-l="' + h(l.line_id) + '" data-k="' + h(r.key) + '"' + (checked ? ' checked' : '') + ' style="width:22px;height:22px;flex:0 0 22px">' +
+    '<div style="flex:1;min-width:0"><b>' + h(l.brand) + (l.item ? ' ' + h(l.item) : '') + '</b><div class="small muted" style="overflow-wrap:anywhere">' + trk(o) + '<a href="#/o/' + o.id + '">' + h(ono(o)) + '</a> • ' + h(dmy(o.order_date)) + ' • baaki ' + pcs(r.rem) + '</div></div>' +
+    '<input type="number" inputmode="numeric" class="' + cls + 'q" data-o="' + o.id + '" data-l="' + h(l.line_id) + '" min="1" max="' + r.rem + '" value="' + r.rem + '" style="width:64px;flex:0 0 64px">' +
+    '</div>';
+}
+function readSelection(root, cls) {
+  var out = [];
+  Array.prototype.forEach.call(root.querySelectorAll('.' + cls + 'sel:checked'), function (c) {
+    var q = root.querySelector('.' + cls + 'q[data-o="' + c.getAttribute('data-o') + '"][data-l="' + c.getAttribute('data-l') + '"]');
+    var n = q ? Number(q.value) : 0;
+    if (n > 0) out.push({ order_id: Number(c.getAttribute('data-o')), line_id: c.getAttribute('data-l'), qty: n });
+  });
+  return out;
+}
+/** executePending: one backend call (lock, per-dealer results, request_id makes a double tap safe). opts {picker_name, picker_id, note}. */
+function runExecutePending(sel, ordersById, opts, ondone) {
+  if (!sel.length) return toast('Kam se kam ek pending line tick karein', 'err');
+  if (sel.some(function (x) { return x.qty !== Math.round(x.qty); })) return toast('Qty poori pcs mein daalein', 'err');
+  var s = execSelectionSummary(sel, ordersById);
+  if (!confirm(s.dealers + ' dealer' + (s.dealers > 1 ? 's' : '') + ' • ' + s.orders + ' purane order • ' + s.pcs + ' pcs\n\nHar dealer ka EK naya "Pending executed" order banega (purane order ka reference ke saath). Purane order ka pending band ho jayega.\n\nAage badhein?')) return;
+  opts = opts || {};
+  var d = { lines: sel, note: opts.note || '', request_id: 'pe' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8) };
+  if (opts.picker_name) d.picker_name = opts.picker_name; if (opts.picker_id) d.picker_id = opts.picker_id;
+  return call('executePending', d).then(function (r) {
+    var oks = (r.results || []).filter(function (x) { return x.ok; }), errs = (r.results || []).filter(function (x) { return !x.ok; });
+    document.querySelectorAll('.sheet').forEach(function (x) { x.remove(); });
+    if (!errs.length) toast(oks.length + ' naya order bana • ' + pcs(r.pcs) + ' • ' + oks.map(function (x) { return x.order_no; }).join(', '));
+    else sheet('<h3>Pending executed: result</h3>' + oks.map(function (x) { return '<div class="small">✅ <b>' + h(x.dealer_name) + '</b>: <a href="#/o/' + x.id + '">' + h(x.order_no) + '</a> • ' + pcs(x.planned) + '</div>'; }).join('') +
+      errs.map(function (x) { return '<div class="small short">❌ <b>' + h(x.dealer_name || '-') + '</b>: ' + h(x.error) + '</div>'; }).join(''));
+    if (ondone) ondone(r);
+  }).catch(function (e) { if (isUnknownAction(e)) toast('Server par Code_v41 deploy baaki hai. Tab tak purana tarika chalega.', 'err'); else fail(e); });
+}
+/** Dealer sheet: every open pending line of this dealer (all old orders); the tapped order is pre-ticked. */
+function openDealerExecute(o, allOrders, ondone) {
+  var mine = (allOrders || []).filter(function (x) { return sameDealerC(x, o); });
+  if (!mine.some(function (x) { return Number(x.id) === Number(o.id); })) mine.unshift(o);
+  var rows = pendingRows(mine, {}), by = {}; mine.forEach(function (x) { by[x.id] = x; });
+  var d = sheet('<div id="pdx"><h3>Execute pending: ' + h(o.dealer_name) + '</h3><p class="small muted">Tick karein kaunsi pending qty ab bhejni hai. Is dealer ka <b>ek naya order</b> banega, tag <b>Pending executed</b>, purane order ka reference ke saath. Purana order picking mein wapas nahi jaata.</p>' +
+    '<label class="chk"><input type="checkbox" id="pdxall"> Sab chunein</label>' +
+    rows.map(function (r) { return pendingLineRowHtml(r, Number(r.o.id) === Number(o.id), 'pdx'); }).join('') +
+    whoSel('pdx_picker', 'picker', '', 'Picker (optional; Trylo ho to pehle punching)') +
+    '<label>Note (optional)</label><input id="pdxn">' +
+    '<button class="primary big" id="pdxgo" style="margin-top:12px">Naya order banayein</button></div>');
+  var box = d.querySelector('#pdx');
+  function upd() { var s = execSelectionSummary(readSelection(box, 'pdx'), by); $('pdxgo').textContent = 'Naya order banayein (' + s.orders + ' order • ' + s.pcs + ' pcs)'; }
+  $('pdxall').onchange = function () { var on = this.checked; Array.prototype.forEach.call(box.querySelectorAll('.pdxsel'), function (c) { c.checked = on; }); upd(); };
+  box.addEventListener('input', upd); box.addEventListener('change', upd); upd();
+  $('pdxgo').onclick = function () {
+    var pn = whoVal('pdx_picker'), pu = pn ? (S.m.users || []).filter(function (u) { return u.name === pn; })[0] : null;
+    runExecutePending(readSelection(box, 'pdx'), by, { picker_name: pn, picker_id: pu && pu.id, note: val('pdxn') }, ondone);
+  };
+}
+/** Pending leftover tab, manager / admin: brand + month filters (dealer filter = queue dealer box), tick lines / dealer / all, bulk push. */
+function pendingBulkHtml(lo) {
+  var fb = LS.getItem('imw_pbb') || '', fm = LS.getItem('imw_pbm') || '';
+  var brands = {}, months = {};
+  pendingRows(lo, {}).forEach(function (r) { if (r.line.brand) brands[String(r.line.brand).toUpperCase()] = 1; months[String(r.o.order_date || '').slice(0, 7)] = 1; });
+  var groups = groupRowsByDealer(pendingRows(lo, { brand: fb, month: fm }));
+  var sel = function (id, cur, opts, all) { return '<select id="' + id + '" style="flex:1;min-width:0"><option value="">' + all + '</option>' + opts.map(function (x) { return '<option' + (x === cur ? ' selected' : '') + '>' + h(x) + '</option>'; }).join('') + '</select>'; };
+  return '<div class="card" id="pbk"><div style="display:flex;gap:8px;flex-wrap:wrap">' + sel('pbb', fb, Object.keys(brands).sort(), 'Sab brands') + sel('pbm', fm, Object.keys(months).filter(Boolean).sort().reverse(), 'Sab months') + '</div>' +
+    '<label class="chk" style="margin-top:8px"><input type="checkbox" id="pball"> <b>Sab chunein</b> (' + groups.length + ' dealers)</label>' +
+    '<div class="small muted">Dealer ya line tick karein, qty badal sakte hain. Neeche wala button har dealer ka ek naya order banata hai.</div></div>' +
+    (groups.length ? groups.map(function (g) {
+      return '<div class="card"><label class="chk" style="font-weight:700"><input type="checkbox" class="pbdl" data-k="' + h(g.key) + '"> ' + h(g.dealer) + '</label><div class="small muted">' + g.order_count + ' purane order • ' + pcs(g.pcs) + ' baaki</div>' +
+        g.rows.map(function (r) { return pendingLineRowHtml(r, false, 'pb'); }).join('') + '</div>';
+    }).join('') : '<div class="card center muted">Is filter mein koi pending nahi.</div>') +
+    /* sticky action bar: stays just above the bottom nav while the list scrolls */
+    '<div id="pbbar" style="position:sticky;bottom:calc(68px + env(safe-area-inset-bottom));z-index:900;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 -2px 12px rgba(0,0,0,.08);padding:8px 10px;display:flex;gap:8px;align-items:center;margin-top:8px">' +
+    '<div class="small" id="pbsum" style="flex:1;min-width:0">Kuch nahi chuna</div><button class="primary" id="pbgo" style="flex:0 0 auto;width:auto;white-space:nowrap">Execute pending (bulk)</button></div>';
+}
+function bindPendingBulk(root, lo, ondone) {
+  var by = {}; (lo || []).forEach(function (x) { by[x.id] = x; });
+  function upd() { var s = execSelectionSummary(readSelection(root, 'pb'), by); $('pbsum').innerHTML = s.pcs ? '<b>' + s.dealers + '</b> dealer • <b>' + s.orders + '</b> order • <b>' + pcs(s.pcs) + '</b> → ' + s.dealers + ' naye order' : 'Kuch nahi chuna'; }
+  $('pbb').onchange = function () { LS.setItem('imw_pbb', this.value); ondone(); };
+  $('pbm').onchange = function () { LS.setItem('imw_pbm', this.value); ondone(); };
+  $('pball').onchange = function () { var on = this.checked; Array.prototype.forEach.call(root.querySelectorAll('.pbsel,.pbdl'), function (c) { c.checked = on; }); upd(); };
+  Array.prototype.forEach.call(root.querySelectorAll('.pbdl'), function (c) {
+    c.onchange = function () { var k = c.getAttribute('data-k'), on = c.checked; Array.prototype.forEach.call(root.querySelectorAll('.pbsel'), function (x) { if (x.getAttribute('data-k') === k) x.checked = on; }); upd(); };
+  });
+  root.addEventListener('input', upd); root.addEventListener('change', upd); upd();
+  $('pbgo').onclick = function () { runExecutePending(readSelection(root, 'pb'), by, {}, ondone); };
+}
+/** Order detail: a Pending executed order shows its old order(s) and the referenced lines. */
+function pendingChildCard(o) {
+  if (!isPendingChildC(o)) return '';
+  var refs = o.pending_refs || [], ps = o.parent_orders || [];
+  if (!refs.length && o.pending_ref_json) { try { refs = JSON.parse(o.pending_ref_json) || []; } catch (e) { refs = []; } }
+  var links = ps.length ? ps.map(function (p) { return '<a href="#/o/' + p.id + '">' + h(p.track_no ? p.track_no + ' ' : '') + h(p.order_no || '#' + p.id) + '</a>' + (p.order_date ? ' (' + h(dmy(p.order_date)) + ')' : '') + (p.invoice_no ? ' • Inv ' + h(p.invoice_no) : '') + (p.archived ? ' • archive' : ''); }).join('<br>')
+    : '<a href="#/o/' + h(o.parent_order_id) + '">' + h(o.parent_order_no || '#' + o.parent_order_id) + '</a>';
+  return '<div class="card" style="border-color:#7b4fb0"><h3><span class="pill pe" style="background:#efe3ff;color:#5b2a86">↩ Pending executed</span></h3><p class="small">Yeh naya order purane order ke pending se bana hai.</p><div class="small"><b>Purana order:</b><br>' + links + '</div>' +
+    (refs.length ? '<div class="small" style="margin-top:6px">' + refs.map(function (x) { return h(x.order_no) + ': ' + h(x.brand) + (x.item ? ' ' + h(x.item) : '') + ' ' + pcs(x.qty); }).join('<br>') + '</div>' : '') + '</div>';
+}
+
+// ---------------- Archive (month-end): search, CSV, admin restore, dry-run preview
+function vArchive(v) {
+  if (!can('pendingexec')) { v.innerHTML = '<div class="card">Archive sirf admin / warehouse manager dekh sakte hain.</div>'; return; }
+  var f = { dealer: LS.getItem('imw_arq') || '', order_no: '', item: '', month: LS.getItem('imw_arm') || '' };
+  v.innerHTML = '<div class="row"><h2>🗄️ Archive</h2><button class="sm" id="arcsv">CSV</button></div><p class="small muted">Har mahine ki ' + h((S.m && S.m.archive_day) || 5) + ' tareekh ko pichhle mahine ke <b>delivered</b> orders (jinka koi pending baaki nahi) yahan aa jaate hain. Pipeline wale orders active lists mein rehte hain.</p>' +
+    '<div class="card"><div class="grid2"><div><label>Dealer</label><input id="ard" value="' + h(f.dealer) + '"></div><div><label>Order / invoice no</label><input id="aro"></div><div><label>Item / brand</label><input id="ari"></div><div><label>Month</label><select id="arm"><option value="">Sab</option>' + (f.month ? '<option selected>' + h(f.month) + '</option>' : '') + '</select></div></div><button class="primary" id="ars" style="margin-top:8px">Search</button></div>' +
+    '<div id="arsum" class="small muted"></div><div id="arlst"></div>' +
+    '<div class="card"><h3>Month-end</h3><p class="small muted">Dry run sirf dikhata hai kya archive hoga, kuch badalta nahi.</p><button class="sm" id="ardry">Dry run dekhein</button>' + (isAdmin() ? ' <button class="sm danger" id="arrun">Month-end abhi chalayein</button>' : '') + '<div id="ardryout" class="small"></div></div>';
+  var last = [];
+  function search() {
+    f = { dealer: val('ard'), order_no: val('aro'), item: val('ari'), month: $('arm').value };
+    LS.setItem('imw_arq', f.dealer); LS.setItem('imw_arm', f.month);
+    call('archiveSearch', f).then(function (r) {
+      var cur = f.month; $('arm').innerHTML = '<option value="">Sab</option>' + (r.months || []).map(function (m) { return '<option' + (m === cur ? ' selected' : '') + '>' + h(m) + '</option>'; }).join('');
+      last = r.orders || [];
+      $('arsum').innerHTML = '<b>' + r.total + '</b> archived orders' + (r.total > last.length ? ' (pehle ' + last.length + ' dikh rahe)' : '') + (isAdmin() && last.length ? ' · <button class="sm" id="arres">Restore chune hue</button>' : '');
+      $('arlst').innerHTML = last.length ? last.map(function (o) {
+        return '<div class="card">' + (isAdmin() ? '<label class="chk"><input type="checkbox" class="arsel" data-id="' + o.id + '"> chunein</label>' : '') + cardInner(o) + '<div class="small muted">Archive: ' + h(o.archived_month || '') + ' • ' + h(o.archived_by || '') + (o.invoice_no ? ' • Inv ' + h(o.invoice_no) : '') + '</div></div>';
+      }).join('') : '<div class="card center muted">Kuch nahi mila.</div>';
+      if ($('arres')) $('arres').onclick = function () {
+        var ids = Array.prototype.map.call(document.querySelectorAll('.arsel:checked'), function (x) { return Number(x.getAttribute('data-id')); });
+        if (!ids.length) return toast('Restore ke liye orders chunein', 'err');
+        if (!confirm(ids.length + ' orders archive se wapas active lists mein laayein?')) return;
+        call('archiveRestore', { ids: ids }).then(function (x) { toast(x.restored + ' orders wapas aa gaye'); search(); }).catch(fail);
+      };
+    }).catch(function (e) { if (isUnknownAction(e)) v.innerHTML = '<div class="card"><h3>Archive abhi band hai</h3><p>Server par naya backend (Code_v41) deploy karein: Manage deployments > pencil > New version.</p></div>'; else fail(e); });
+  }
+  $('ars').onclick = search;
+  $('arcsv').onclick = function () { csv(last.map(function (o) { return { order_no: o.order_no || o.src_id, track_no: o.track_no || '', order_date: o.order_date, dealer: o.dealer_name, stage: o.stage, invoice_no: o.invoice_no || '', pcs: o.pcs, items: (o.lines || []).map(function (l) { return l.brand + (l.item ? ' ' + l.item : '') + ' ' + l.ordered_qty; }).join(' + '), archived_month: o.archived_month || '', archived_by: o.archived_by || '' }; }), 'archive'); };
+  function showPlan(r, ran) {
+    var c = r.counts || {};
+    $('ardryout').innerHTML = '<p>' + (ran ? '<b>Ho gaya.</b> ' : '<b>Dry run</b> ') + '(' + h(r.run_month) + ', cutoff ' + h(dmy(r.cutoff)) + '): archive <b>' + (ran ? r.archived_now : c.archive) + '</b> • pipeline mein rahenge <b>' + c.keep + '</b> (pending wale ' + (c.keep_with_pending || 0) + ')</p>' +
+      ((r.archive || []).length && !ran ? '<details><summary>Archive honge (' + c.archive + ')</summary>' + r.archive.slice(0, 100).map(function (x) { return h(x.order_no) + ' • ' + h(x.dealer_name) + ' • ' + h(dmy(x.order_date)); }).join('<br>') + '</details>' : '') +
+      ((r.keep || []).length ? '<details><summary>Pipeline mein rahenge (' + c.keep + ')</summary>' + r.keep.slice(0, 100).map(function (x) { return '<a href="#/o/' + x.id + '">' + h(x.order_no) + '</a> • ' + h(x.dealer_name) + ' • ' + h(stageLbl(x.stage)) + (x.pending ? ' • pending ' + pcs(x.pending) : ''); }).join('<br>') + '</details>' : '');
+  }
+  $('ardry').onclick = function () { call('archivePreview', {}).then(function (r) { showPlan(r, false); }).catch(fail); };
+  if ($('arrun')) $('arrun').onclick = function () { if (!confirm('Pichhle mahine ke delivered orders (bina pending) abhi archive karein? Baad mein Restore ho sakta hai.')) return; call('archiveRunNow', {}).then(function (r) { showPlan(r, true); search(); }).catch(fail); };
+  search();
 }
 
 function vQueue(v) {
@@ -780,7 +960,10 @@ function vQueue(v) {
       if (qs === 'pending_left') {
         var lo = ((left && left.orders) || []).filter(function (o) { return qDealerOk(o, dq); });
         $('qn').textContent = lo.length;
-        $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : '') + '<b>' + lo.length + '</b> orders with leftover pending, <b>' + pcs((dq ? lo : (left && left.orders) || []).reduce(function (a, o) { return a + (Number(o.pending_qty) || 0); }, 0)) + ' baaki</b>. Pending executed se yahi order picking queue mein wapas jaata hai — naya order nahi.';
+        S.leftAll = (left && left.orders) || [];
+        var bulk = can('pendingexec') && hasPendingChild();
+        $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : '') + '<b>' + lo.length + '</b> orders with leftover pending, <b>' + pcs((dq ? lo : (left && left.orders) || []).reduce(function (a, o) { return a + (Number(o.pending_qty) || 0); }, 0)) + ' baaki</b>. ' + (hasPendingChild() ? 'Dealer / lines tick karke Execute pending dabayein: har dealer ka ek naya "Pending executed" order banega. Dealer filter upar ke dealer box se.' : 'Pending executed se yahi order picking queue mein wapas jaata hai — naya order nahi.');
+        if (bulk) { $('qlst').innerHTML = lo.length ? pendingBulkHtml(lo) : '<div class="card center muted">Koi leftover pending nahi.</div>'; if (lo.length) bindPendingBulk($('qlst'), lo, function () { vQueue(v); }); return; }
         $('qlst').innerHTML = lo.length ? lo.map(leftoverCard).join('') : '<div class="card center muted">Koi leftover pending nahi.</div>';
         Array.prototype.forEach.call(v.querySelectorAll('[data-pex]'), function (b) { b.onclick = function () { var id = Number(b.getAttribute('data-pex')); var o = lo.filter(function (x) { return Number(x.id) === id; })[0]; if (o) openPendingExec(o, function () { vQueue(v); }); }; });
         return;
@@ -791,7 +974,7 @@ function vQueue(v) {
       var pendHead = '';
       if (dq && dealerPend) {
         var openP = dealerPend.open || [];
-        if (openP.length) pendHead = '<div class="card" style="border-color:var(--danger, #c0392b)"><h3>Is dealer ke leftover pending (' + openP.length + ')</h3><p class="small muted">Pending executed se yahi order picking par jaayega. Combined baaki <b>' + pcs(dealerPend.remaining) + '</b>.</p>' + openP.map(leftoverCard).join('') + '</div>';
+        if (openP.length) pendHead = '<div class="card" style="border-color:var(--danger, #c0392b)"><h3>Is dealer ke leftover pending (' + openP.length + ')</h3><p class="small muted">' + (hasPendingChild() ? 'Execute pending se is dealer ka naya order banega.' : 'Pending executed se yahi order picking par jaayega.') + ' Combined baaki <b>' + pcs(dealerPend.remaining) + '</b>.</p>' + openP.map(leftoverCard).join('') + '</div>';
       }
       $('qn').textContent = f.length + (r || dq || qs ? ' / ' + list.length : '');
       $('qsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : 'Sab: ') + '<b>' + f.length + '</b> orders, <b>' + pcs(tp) + '</b>' +
@@ -1054,7 +1237,7 @@ function pendingCycleOf(o) {
   var list = o.pending_execs || [];
   for (var i = list.length - 1; i >= 0; i--) {
     var st = list[i].cycle_status;
-    if (st && st !== 'billed' && st !== 'complete' && st !== 'packed' && st !== 'dispatched' && st !== 'delivered') return list[i];
+    if (st && st !== 'billed' && st !== 'complete' && st !== 'packed' && st !== 'dispatched' && st !== 'delivered' && st !== 'child' && st !== 'void') return list[i];
   }
   return Number(o.pending_cycle) ? { cycle_status: o.stage, picker_name: o.picker_name, planned_qty: o.pending_qty, qty: 0 } : null;
 }
@@ -1063,15 +1246,16 @@ function pendingExecCard(o) {
   var cyc = pendingCycleOf(o);
   var hist = (o.pending_execs || []).map(function (g) {
     var ls = (g.lines || []).map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ' ' + pcs(l.qty || l.planned_qty); }).join(' + ');
+    if (g.kind === 'child' || g.cycle_status === 'child' || g.cycle_status === 'void') return '<div class="small" style="margin:6px 0"><b>' + h(dmy(g.exec_date)) + '</b> • ' + pcs(g.planned_qty || g.qty) + ' → naya order <a href="#/o/' + h(g.child_order_id) + '">' + h(g.child_order_no || '#' + g.child_order_id) + '</a>' + (g.cycle_status === 'void' ? ' <span class="short">(cancel / delete: pending wapas)</span>' : '') + (g.by_name ? ' • ' + h(g.by_name) : '') + '<div class="muted">' + ls + (g.note ? ' • ' + h(g.note) : '') + '</div></div>';
     var st = g.cycle_status === 'allocated' ? 'picking baaki' : g.cycle_status === 'picked' || g.cycle_status === 'checked' ? 'bill baaki' : g.invoice_no ? ('Inv ' + g.invoice_no) : '';
     return '<div class="small" style="margin:6px 0"><b>' + h(dmy(g.exec_date)) + '</b> • ' + pcs(g.qty || g.planned_qty) + (g.picker_name ? ' • picker ' + h(g.picker_name) : '') + (st ? ' • ' + h(st) : '') + '<div class="muted">' + ls + (g.note ? ' • ' + h(g.note) : '') + '</div></div>';
   }).join('') || '<p class="muted small">Abhi koi pending cycle nahi.</p>';
   var status = p.status === 'complete' ? '<span class="pill" style="background:#e6f4ea;color:#1e7e34">Pending complete</span>' : (p.status === 'open' && Number(p.remaining) > 0 ? '<span class="pill st-hold">Baaki ' + pcs(p.remaining) + '</span>' : '');
   if (!p.status && !(o.pending_execs || []).length) return pendingWarnHtml(o);
-  var btn = can('pendingexec') && p.status === 'open' && Number(p.remaining) > 0 && !cyc ? '<button class="primary" id="pexbtn" style="margin-top:8px">Pending executed</button>' : '';
+  var btn = can('pendingexec') && p.status === 'open' && Number(p.remaining) > 0 && !cyc ? '<button class="primary" id="pexbtn" style="margin-top:8px">' + (hasPendingChild() ? 'Execute pending → naya order' : 'Pending executed') + '</button>' : '';
   var cycMsg = cyc ? '<p class="small short">Ab yeh order Meri queue mein hai: <b>' + h(stageLbl(o.stage)) + '</b>' + (cyc.picker_name ? ' • picker ' + h(cyc.picker_name) : '') + '. Normal tarike se pick, check, phir bill karein. Invoice is cycle par lagega; pehla invoice nahi badlega.</p>' : '';
   var warn = pendingWarnHtml(o);
-  return warn + '<div class="card"><h3>Pending leftover</h3><p class="small">Pehli fulfillment ke baad baaki qty isi purane order par pick / bill hoti hai (naya order nahi). ' + status + '</p>' + cycMsg +
+  return warn + '<div class="card"><h3>Pending leftover</h3><p class="small">' + (hasPendingChild() ? 'Short qty is order par pipeline mein rehti hai. Execute karne par is dealer ka naya "Pending executed" order banta hai (sirf pending pcs). ' : 'Pehli fulfillment ke baad baaki qty isi purane order par pick / bill hoti hai (naya order nahi). ') + status + '</p>' + cycMsg +
     ((p.lines || []).length ? '<div class="small">' + p.lines.map(function (l) { return h(l.brand) + (l.item ? ' ' + h(l.item) : '') + ': baaki ' + pcs(l.remaining) + (l.opening != null ? ' (opening ' + pcs(l.opening) : '') + (l.opening != null ? ')' : ''); }).join('<br>') + '</div>' : '') +
     btn + '<h3 style="margin-top:12px">Execution history</h3>' + hist + '</div>';
 }
@@ -1156,9 +1340,9 @@ function vOrder(v, id) {
     v.innerHTML = '<div class="card"><div class="row"><h2>' + trk(o) + h(ono(o)) + ' <a href="' + dealerHref(o) + '" style="color:inherit">' + h(o.dealer_name) + '</a></h2><span class="pills">' + pill(o) + badges(o) + '</span></div><div class="small muted">Zone ' + h(o.zone || '-') + ' • ' + h(o.area || 'area ?') + ' • ' + h(o.route || '-') + (o.beat_day ? ' • beat ' + h(o.beat_day) : '') + (o.lat !== '' ? ' • <a target="_blank" href="https://www.google.com/maps?q=' + o.lat + ',' + o.lng + '">map</a>' : '') + '</div>' + '<div class="small" style="margin-top:4px">' + slaBadge(o, true) + (can('recvtime') && o.sla && !o.sla.billed && o.stage !== 'cancelled' ? '<button class="sm" id="rte" style="margin-top:6px">⏱ Order aaya time badlein</button>' : '') + '</div>' + (o.remarks ? '<div class="small">Remark: ' + h(o.remarks) + '</div>' : '') +
       '<div class="small muted">Source: ' + h(srcOf(o)) + (o.taken_by ? ' • liya: ' + h(o.taken_by) : '') + (o.salesman ? ' • salesman: ' + h(o.salesman) : '') + (o.expected_date ? ' • expected dispatch ' + h(dmy(o.expected_date)) : '') + (o.edited_at ? ' • edited ' + tm(o.edited_at) + ' ' + h(o.edited_by) : '') + '</div>' +
       (o.stage === 'cancelled' ? '<div class="short">Cancel: ' + h(o.cancel_reason) + ' (' + tm(o.cancelled_at) + ', ' + h(o.cancelled_by) + ')</div>' : '') +
-      (manEdit ? '<div class="row" style="margin-top:8px"><a class="btn sm" href="#/' + (isStore(o) ? 'sq/' : '') + 'edit/' + o.id + '">✏️ Edit</a><button class="sm danger" id="cnl">Cancel order</button></div>' : '') +
+      (manEdit ? '<div class="row" style="margin-top:8px">' + (isPendingChildC(o) ? '' : '<a class="btn sm" href="#/' + (isStore(o) ? 'sq/' : '') + 'edit/' + o.id + '">✏️ Edit</a>') + '<button class="sm danger" id="cnl">Cancel order</button></div>' : '') +
       (canMergeUi() && mergeOk(o) ? '<div class="row" style="margin-top:8px"><button class="sm danger" id="odel">🗑 Delete order</button></div>' : '') + '</div>' +
-      (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + dupCard(o, r.dup_orders) + (o.merged_into ? '<div class="card short">Ye order duplicate tha, <a href="#/o/' + h(o.merged_into) + '">' + h((o.merged_into_order && (o.merged_into_order.track_no || o.merged_into_order.order_no)) || '#' + o.merged_into) + '</a> mein merge hua (' + tm(o.merged_at) + ', ' + h(o.merged_by) + ')</div>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + (cyc ? '<p class="small short">Leftover cycle chal raha hai — ab ' + h(stageLbl(o.stage)) + (cyc.picker_name ? ', picker ' + h(cyc.picker_name) : '') + '. Pehli pick / bill history same rehti hai.</p>' : '') + tl + qtyEditHistory(r.log) + act + '</div>' + pendingExecCard(o) + waitCard(o) + planCard(o) + hold + del + nb;
+      (isMgr() ? '<details class="card"><summary><b>Area / zone badlein</b></summary>' + dlists() + '<div class="grid2"><div><label>Zone</label><input id="oz" list="dl_zone" value="' + h(o.zone) + '"></div><div><label>Area</label><input id="oa" list="dl_area" value="' + h(o.area) + '"></div></div><label>Route</label><input id="or" list="dl_route" value="' + h(o.route) + '"><p class="small muted">Dealer master aur uske open orders mein bhi update hoga. Sync isse overwrite nahi karega.</p><button class="primary" id="oas">Save</button></details>' : '') + pendingChildCard(o) + dupCard(o, r.dup_orders) + (o.merged_into ? '<div class="card short">Ye order duplicate tha, <a href="#/o/' + h(o.merged_into) + '">' + h((o.merged_into_order && (o.merged_into_order.track_no || o.merged_into_order.order_no)) || '#' + o.merged_into) + '</a> mein merge hua (' + tm(o.merged_at) + ', ' + h(o.merged_by) + ')</div>' : '') + '<div class="card"><h3>Items</h3>' + lines + '</div><div class="card"><h3>Timeline</h3>' + (cyc ? '<p class="small short">Leftover cycle chal raha hai — ab ' + h(stageLbl(o.stage)) + (cyc.picker_name ? ', picker ' + h(cyc.picker_name) : '') + '. Pehli pick / bill history same rehti hai.</p>' : '') + tl + qtyEditHistory(r.log) + act + '</div>' + pendingExecCard(o) + waitCard(o) + planCard(o) + hold + del + nb;
     var billPhotos = {};
     if (mine && nx === 'pack') bindPackBoxInputs();
     if (mine && nx === 'bill' && isStore(o)) bindPhotoInputs(billPhotos);
@@ -1582,6 +1766,7 @@ function vStoreQueue(v) {
       if (qs === 'pending_left') {
         $('sqn').textContent = leftList.length;
         $('sqsum').innerHTML = (bits.length ? bits.join(' · ') + ': ' : '') + '<b>' + leftList.length + '</b> store orders with leftover pending, <b>' + pcs(leftList.reduce(function (a, o) { return a + (Number(o.pending_qty) || 0); }, 0)) + ' baaki</b>. Pending executed se yahi order picking par wapas jaata hai.';
+        S.leftAll = leftList;
         $('sqlst').innerHTML = leftList.length ? leftList.map(leftoverStoreCard).join('') : '<div class="card center muted">Koi leftover pending nahi.</div>';
         bindPex(leftList);
         return;
